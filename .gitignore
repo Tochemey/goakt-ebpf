@@ -27,6 +27,11 @@ go.work.sum
 # env file
 .env
 
+# Earthly
+.earthly/
+
+
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+vendor/

@@ -1,0 +1,64 @@
+# Integration example: GoAkt app, goakt-ebpf agent, OTel Collector, Jaeger
+# Run from repo root: docker compose -f examples/integration/docker-compose.yml up --build
+# View traces: http://localhost:16686
+
+services:
+  # OpenTelemetry Collector - receives traces from the agent, forwards to Jaeger
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - goakt-ebpf-net
+
+  # Jaeger - trace visualization (http://localhost:16686)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI
+    networks:
+      - goakt-ebpf-net
+
+  # Minimal GoAkt app - target for eBPF instrumentation
+  goakt-app:
+    container_name: goakt-app
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    networks:
+      - goakt-ebpf-net
+    # Keep running for the agent to attach
+    stdin_open: true
+    tty: true
+
+  # goakt-ebpf agent - attaches to goakt-app, exports traces to collector
+  goakt-ebpf:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+      - BPF
+      - PERFMON
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    depends_on:
+      - otel-collector
+      - goakt-app
+    pid: "container:goakt-app"  # Share PID namespace to attach to app
+    networks:
+      - goakt-ebpf-net
+    # Args for entrypoint: -pid 1 (app is PID 1 in shared PID namespace)
+    command: ["-pid", "1"]
+
+networks:
+  goakt-ebpf-net:
+    driver: bridge

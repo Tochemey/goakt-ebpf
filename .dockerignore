@@ -1,0 +1,24 @@
+# Git and IDE
+.git
+.gitignore
+.cursor
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+goakt-ebpf
+*.o
+*.test
+
+# Docs and plans (not needed for build)
+docs/
+*.md
+!README.md
+
+# Integration example (built separately)
+examples/
+
+# Earthly
+Earthfile
+.earthly
