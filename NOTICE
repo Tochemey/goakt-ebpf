@@ -1,0 +1,24 @@
+goakt-ebpf
+
+Copyright (c) 2025 The GoAkt eBPF Authors.
+SPDX-License-Identifier: Apache-2.0
+
+---
+
+This project includes code copied from and derived from the following:
+
+OpenTelemetry Go Instrumentation
+  - Source: https://github.com/open-telemetry/opentelemetry-go-instrumentation
+  - License: Apache-2.0
+  - Copyright: The OpenTelemetry Authors
+
+  The following components were copied and adapted for the GoAkt eBPF agent:
+  - internal/include (eBPF C headers)
+  - internal/process
+  - internal/structfield
+  - internal/inject
+  - internal/instrumentation (config, manager, probe, bpffs, kernel, context, pdataconv, debug)
+  - pipeline and pipeline/otelsdk
+
+  The GoAkt-specific instrumentation probes (internal/instrumentation/bpf/github.com/tochemey/goakt/actor/)
+  use patterns and structure from OpenTelemetry Go Instrumentation but are original implementations.

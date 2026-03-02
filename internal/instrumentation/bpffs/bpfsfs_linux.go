@@ -1,0 +1,57 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copied from go.opentelemetry.io/auto and adapted for GoAkt eBPF agent.
+
+// Package bpffs manages the BPF file-system.
+package bpffs
+
+import (
+	"fmt"
+	"os"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/tochemey/goakt-ebpf/internal/process"
+)
+
+// BPFFsPath is the system path to the BPF file-system.
+const bpfFsPath = "/sys/fs/bpf"
+
+// PathForTargetApplication returns the path to the BPF file-system for the given target.
+func PathForTargetApplication(pi *process.Info) string {
+	return fmt.Sprintf("%s/%d", bpfFsPath, pi.ID)
+}
+
+// Mount mounts the BPF file-system for the given target.
+func Mount(target *process.Info) error {
+	if !isBPFFSMounted() {
+		// Directory does not exist, create it and mount
+		if err := os.MkdirAll(bpfFsPath, 0o755); err != nil {
+			return err
+		}
+
+		err := unix.Mount(bpfFsPath, bpfFsPath, "bpf", 0, "")
+		if err != nil {
+			return err
+		}
+	}
+
+	// create directory with read, write and execute permissions
+	return os.Mkdir(PathForTargetApplication(target), 0o755)
+}
+
+func isBPFFSMounted() bool {
+	var stat unix.Statfs_t
+	err := unix.Statfs(bpfFsPath, &stat)
+	if err != nil {
+		return false
+	}
+
+	return stat.Type == unix.BPF_FS_MAGIC
+}
+
+// Cleanup removes the BPF file-system for the given target.
+func Cleanup(target *process.Info) error {
+	return os.RemoveAll(PathForTargetApplication(target))
+}

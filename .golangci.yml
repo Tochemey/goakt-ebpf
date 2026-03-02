@@ -1,0 +1,72 @@
+version: "2"
+run:
+  concurrency: 4
+  issues-exit-code: 2
+  tests: true
+  modules-download-mode: mod
+  relative-path-mode: gomod
+output:
+  path-prefix: ""
+linters:
+  default: none
+  enable:
+    - gocyclo
+    - gosec
+    - misspell
+    - revive
+    - staticcheck
+    - whitespace
+    - govet
+  settings:
+    gosec:
+      excludes:
+        - G115
+        - G602
+    misspell:
+      locale: US
+      ignore-rules:
+        - cancelled
+        - behaviour
+        - initialised
+        - materialise
+    revive:
+      enable-all-rules: false
+      enable-default-rules: true
+      rules:
+        - name: var-naming
+          arguments:
+            - []
+            - []
+            - [{ skipPackageNameChecks: true }]
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - revive
+        path: _test\.go
+        text: context.Context should be the first parameter of a function
+      - linters:
+          - revive
+        path: _test\.go
+        text: exported func.*returns unexported type
+      - linters:
+          - revive
+        text: ".*stutters.*"
+      - linters:
+          - revive
+        text: "unused-parameter:"
+    paths:
+      - vendor
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - vendor

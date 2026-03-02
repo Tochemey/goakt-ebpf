@@ -1,0 +1,7 @@
+# Earthly ignore - exclude from build context
+.git
+.gitignore
+*.md
+docs
+coverage.out
+.env
