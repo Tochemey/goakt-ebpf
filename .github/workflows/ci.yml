@@ -68,7 +68,13 @@ jobs:
           cache-dependency-path: "**/*.sum"
 
       - name: Test
-        run: go test -v -race -count=1 ./...
+        run: go test -v -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Tochemey/goakt-ebpf
 
   lint:
     name: Lint

@@ -6,6 +6,7 @@
 ---
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main)](https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l)](https://codecov.io/gh/Tochemey/goakt-ebpf)
 
 eBPF tracing agent for [GoAkt](https://github.com/tochemey/goakt) — zero-instrumentation tracing of actor message flow, remoting, and grains.
 
@@ -15,7 +16,7 @@ goakt-ebpf attaches to running GoAkt applications and observes actor message han
 
 ## 💡 What is eBPF?
 
-**eBPF** (extended Berkeley Packet Filter) is a Linux kernel technology that allows running sandboxed programs in the kernel without changing kernel source code or loading modules. For goakt-ebpf, we use **uprobes** — user-space probes that attach to function entry and exit points in the target process. When a GoAkt application handles a message, the eBPF program runs in kernel space, records timestamps and IDs, and sends events to userspace via a perf buffer. This approach is safe, low-overhead, and requires no instrumentation in your application code.
+**eBPF** is a Linux kernel technology that lets us observe your GoAkt application at runtime without modifying your code. The agent attaches to your process and captures actor activity as it happens — safe, low-overhead, and fully transparent. For implementation details, see [Architecture](docs/ARCHITECTURE.md).
 
 ## 📡 OpenTelemetry Integration
 
@@ -176,52 +177,22 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 ))
 ```
 
-## 🎯 Instrumentation Targets
+## 🎯 What You'll See in Traces
 
-| Symbol                                            | Span                            | Attributes                                                  |
-|---------------------------------------------------|---------------------------------|-------------------------------------------------------------|
-| `(*PID).doReceive`                                | actor.doReceive                 | received_timestamp, handled_timestamp, handled_successfully |
-| `(*grainPID).handleGrainContext`                  | actor.grainDoReceive            | received_timestamp, handled_timestamp, handled_successfully |
-| `(*actorSystem).handleRemoteTell`                 | actor.remoteTell                | sent_timestamp                                              |
-| `(*actorSystem).handleRemoteAsk`                  | actor.remoteAsk                 | sent_timestamp                                              |
-| `(*actorSystem).remoteTellHandler`                | actor.remoteTellReceive         | received_timestamp                                          |
-| `(*actorSystem).remoteAskHandler`                 | actor.remoteAskReceive          | received_timestamp                                          |
-| `(*actorSystem).remoteTellGrain`                  | actor.remoteTellGrain           | sent_timestamp (grain client)                               |
-| `(*actorSystem).remoteAskGrain`                   | actor.remoteAskGrain            | sent_timestamp (grain client)                               |
-| `(*actorSystem).Spawn`                            | actor.systemSpawn               | actor.operation=spawn                                       |
-| `(*actorSystem).SpawnOn`                          | actor.spawnOn                   | actor.operation=spawn_on (remote placement, optional)       |
-| `(*actorSystem).remoteSpawnHandler`               | actor.remoteSpawn               | actor.operation=remote_spawn                                |
-| `(*actorSystem).remoteSpawnChildHandler`          | actor.remoteSpawnChild          | actor.operation=remote_spawn_child                          |
-| `(*actorSystem).remoteLookupHandler`              | actor.remoteLookup              | actor.operation=remote_lookup                               |
-| `(*actorSystem).remoteReSpawnHandler`             | actor.remoteReSpawn             | actor.operation=remote_respawn                              |
-| `(*actorSystem).remoteStopHandler`                | actor.remoteStop                | actor.operation=remote_stop                                 |
-| `(*actorSystem).remoteAskGrainHandler`            | actor.remoteAskGrainReceive     | received_timestamp (grain server)                           |
-| `(*actorSystem).remoteTellGrainHandler`           | actor.remoteTellGrainReceive    | received_timestamp (grain server)                           |
-| `(*actorSystem).remoteActivateGrainHandler`       | actor.remoteActivateGrain       | actor.operation=remote_activate_grain                       |
-| `(*actorSystem).remoteReinstateHandler`           | actor.remoteReinstate           | actor.operation=remote_reinstate                            |
-| `(*actorSystem).remotePassivationStrategyHandler` | actor.remotePassivationStrategy | (optional)                                                  |
-| `(*actorSystem).remoteStateHandler`               | actor.remoteState               | (optional)                                                  |
-| `(*actorSystem).remoteChildrenHandler`            | actor.remoteChildren            | (optional)                                                  |
-| `(*actorSystem).remoteParentHandler`              | actor.remoteParent              | (optional)                                                  |
-| `(*actorSystem).remoteKindHandler`                | actor.remoteKind                | (optional)                                                  |
-| `(*actorSystem).remoteDependenciesHandler`        | actor.remoteDependencies        | (optional)                                                  |
-| `(*actorSystem).remoteMetricHandler`              | actor.remoteMetric              | (optional)                                                  |
-| `(*actorSystem).remoteRoleHandler`                | actor.remoteRole                | (optional)                                                  |
-| `(*actorSystem).remoteStashSizeHandler`           | actor.remoteStashSize           | (optional)                                                  |
-| `(*PID).process`                                  | actor.process                   | actor.type=pid                                              |
-| `(*PID).SpawnChild`                               | actor.spawnChild                | actor.operation=spawn_child                                 |
-| `(*grainPID).process`                             | actor.grainProcess              | actor.type=grain                                            |
-| `(*relocator).Relocate`                           | actor.relocation                | actor.operation=relocation (optional)                       |
-| `(*PID).handleReceivedError`                      | (marks doReceive failed)        | handled_successfully=false                                  |
+goakt-ebpf gives you visibility into your GoAkt application without changing a single line of code. In Jaeger, Tempo, or any OTLP backend, you'll see spans for:
+
+- **Actor message handling** — When actors receive and process messages (`doReceive`), including timing and success/failure.
+- **Grain processing** — Grain message handling, activation, and lifecycle operations.
+- **Remote Tell & Ask** — Sends and receives across nodes: when messages leave your process and when they arrive.
+- **Remote grains** — Client-side grain calls (Tell/Ask) and server-side grain receives.
+- **Actor lifecycle** — Spawn (system and child), remote spawn, lookup, stop, respawn, and relocation.
+- **Remoting metadata** — Optional spans for passivation, state, children, parent, kind, dependencies, metrics, and stash size.
+
+Spans include timestamps (received, handled, sent) and operation attributes so you can trace message flow end-to-end. For the complete symbol-level reference, see [Architecture](docs/ARCHITECTURE.md).
 
 ## 🔄 How It Works
 
-1. **Attach** — The agent resolves the target PID, loads eBPF programs, and attaches uprobes to GoAkt runtime symbols.
-2. **Capture** — On function entry (e.g. `doReceive`), the eBPF program allocates a span slot, records start time, and generates trace/span IDs.
-3. **Correlate** — On function return (or `handleReceivedError` for failures), the program records end time and emits the span via a perf buffer.
-4. **Export** — Userspace reads perf events, converts them to OTLP spans, and exports to the configured endpoint.
-
-For more detail, see [Architecture](docs/ARCHITECTURE.md).
+The agent attaches to your GoAkt process, captures actor activity as it happens, and exports spans via OTLP. No code changes, no redeployment. For implementation details (attach, capture, correlate, export), see [Architecture](docs/ARCHITECTURE.md).
 
 ## ✅ Compatibility
 

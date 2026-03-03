@@ -4,6 +4,10 @@
 
 goakt-ebpf is a standalone eBPF agent that instruments [GoAkt](https://github.com/tochemey/goakt) applications without code changes. It attaches uprobes to GoAkt runtime functions and exports traces via OpenTelemetry Protocol (OTLP).
 
+## What is eBPF?
+
+**eBPF** (extended Berkeley Packet Filter) is a Linux kernel technology that allows running sandboxed programs in the kernel without changing kernel source code or loading modules. For goakt-ebpf, we use **uprobes** — user-space probes that attach to function entry and exit points in the target process. When a GoAkt application handles a message, the eBPF program runs in kernel space, records timestamps and IDs, and sends events to userspace via a perf buffer. This approach is safe, low-overhead, and requires no instrumentation in your application code.
+
 ## Components
 
 ```
@@ -46,22 +50,43 @@ Each instrumented function has:
 
 ## Instrumented Symbols (GoAkt v4)
 
-| Symbol                               | Purpose                             |
-|--------------------------------------|-------------------------------------|
-| `(*PID).doReceive`                   | Actor message receive               |
-| `(*grainPID).handleGrainContext`     | Grain message receive               |
-| `(*actorSystem).handleRemoteTell`    | Remote Tell send                    |
-| `(*actorSystem).handleRemoteAsk`      | Remote Ask send                     |
-| `(*actorSystem).remoteTellHandler`    | Remote Tell receive (TCP)           |
-| `(*actorSystem).remoteAskHandler`     | Remote Ask receive (TCP)            |
-| `(*actorSystem).Spawn`               | Actor system spawn                  |
-| `(*actorSystem).remoteSpawnHandler`   | Remote spawn receive (TCP)          |
-| `(*actorSystem).remoteSpawnChildHandler` | Remote spawn child receive (TCP) |
-| `(*PID).process`                     | Actor mailbox loop                  |
-| `(*PID).SpawnChild`                  | PID spawn child                     |
-| `(*grainPID).process`                | Grain mailbox loop                  |
-| `(*relocator).Relocate`              | Cluster relocation (optional)       |
-| `(*PID).handleReceivedError`         | Mark doReceive as failed (optional) |
+Full reference of probe targets, span names, and attributes:
+
+| Symbol                                            | Span                            | Attributes                                                  |
+|---------------------------------------------------|---------------------------------|-------------------------------------------------------------|
+| `(*PID).doReceive`                                | actor.doReceive                 | received_timestamp, handled_timestamp, handled_successfully |
+| `(*grainPID).handleGrainContext`                  | actor.grainDoReceive            | received_timestamp, handled_timestamp, handled_successfully |
+| `(*actorSystem).handleRemoteTell`                 | actor.remoteTell                | sent_timestamp                                              |
+| `(*actorSystem).handleRemoteAsk`                  | actor.remoteAsk                 | sent_timestamp                                              |
+| `(*actorSystem).remoteTellHandler`                | actor.remoteTellReceive         | received_timestamp                                          |
+| `(*actorSystem).remoteAskHandler`                 | actor.remoteAskReceive          | received_timestamp                                          |
+| `(*actorSystem).remoteTellGrain`                  | actor.remoteTellGrain           | sent_timestamp (grain client)                               |
+| `(*actorSystem).remoteAskGrain`                   | actor.remoteAskGrain            | sent_timestamp (grain client)                               |
+| `(*actorSystem).Spawn`                            | actor.systemSpawn               | actor.operation=spawn                                       |
+| `(*actorSystem).SpawnOn`                          | actor.spawnOn                   | actor.operation=spawn_on (remote placement, optional)       |
+| `(*actorSystem).remoteSpawnHandler`               | actor.remoteSpawn               | actor.operation=remote_spawn                                |
+| `(*actorSystem).remoteSpawnChildHandler`          | actor.remoteSpawnChild          | actor.operation=remote_spawn_child                          |
+| `(*actorSystem).remoteLookupHandler`              | actor.remoteLookup              | actor.operation=remote_lookup                               |
+| `(*actorSystem).remoteReSpawnHandler`             | actor.remoteReSpawn             | actor.operation=remote_respawn                              |
+| `(*actorSystem).remoteStopHandler`                | actor.remoteStop                | actor.operation=remote_stop                                 |
+| `(*actorSystem).remoteAskGrainHandler`            | actor.remoteAskGrainReceive     | received_timestamp (grain server)                           |
+| `(*actorSystem).remoteTellGrainHandler`           | actor.remoteTellGrainReceive    | received_timestamp (grain server)                           |
+| `(*actorSystem).remoteActivateGrainHandler`       | actor.remoteActivateGrain       | actor.operation=remote_activate_grain                      |
+| `(*actorSystem).remoteReinstateHandler`           | actor.remoteReinstate           | actor.operation=remote_reinstate                            |
+| `(*actorSystem).remotePassivationStrategyHandler` | actor.remotePassivationStrategy | (optional)                                                  |
+| `(*actorSystem).remoteStateHandler`               | actor.remoteState               | (optional)                                                  |
+| `(*actorSystem).remoteChildrenHandler`            | actor.remoteChildren            | (optional)                                                  |
+| `(*actorSystem).remoteParentHandler`              | actor.remoteParent              | (optional)                                                  |
+| `(*actorSystem).remoteKindHandler`                | actor.remoteKind                | (optional)                                                  |
+| `(*actorSystem).remoteDependenciesHandler`        | actor.remoteDependencies        | (optional)                                                  |
+| `(*actorSystem).remoteMetricHandler`              | actor.remoteMetric              | (optional)                                                  |
+| `(*actorSystem).remoteRoleHandler`                | actor.remoteRole                | (optional)                                                  |
+| `(*actorSystem).remoteStashSizeHandler`           | actor.remoteStashSize           | (optional)                                                  |
+| `(*PID).process`                                  | actor.process                   | actor.type=pid                                              |
+| `(*PID).SpawnChild`                               | actor.spawnChild                | actor.operation=spawn_child                                 |
+| `(*grainPID).process`                             | actor.grainProcess              | actor.type=grain                                            |
+| `(*relocator).Relocate`                           | actor.relocation                | actor.operation=relocation (optional)                       |
+| `(*PID).handleReceivedError`                      | (marks doReceive failed)        | handled_successfully=false                                  |
 
 ## Dependencies
 
