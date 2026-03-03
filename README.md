@@ -139,7 +139,23 @@ spec:
 
 ### Bare Metal / Systemd
 
-When the agent and GoAkt app run on the same Linux host, use `-pid` with the target process ID or `-exe` with the executable path:
+When the agent and GoAkt app run on the same Linux host, use `-pid` with the target process ID or `-exe` with the executable path.
+
+**Obtaining the executable** — Either build from source or extract from the Docker image:
+
+```bash
+# Option 1: Build from source (requires Linux; see Build section for non-Linux)
+go mod tidy
+# On non-Linux: ./scripts/generate-bpf.sh first
+go build -o goakt-ebpf ./cmd/cli/...
+
+# Option 2: Extract from Docker image (no build required)
+docker pull ghcr.io/tochemey/goakt-ebpf:latest
+docker run --rm --entrypoint cat ghcr.io/tochemey/goakt-ebpf:latest /usr/local/bin/goakt-ebpf > goakt-ebpf
+chmod +x goakt-ebpf
+```
+
+**Run the agent:**
 
 ```bash
 ./goakt-ebpf -pid $(pgrep -f your-goakt-app)
