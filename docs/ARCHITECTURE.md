@@ -46,15 +46,22 @@ Each instrumented function has:
 
 ## Instrumented Symbols (GoAkt v4)
 
-| Symbol                            | Purpose                             |
-|-----------------------------------|-------------------------------------|
-| `(*PID).doReceive`                | Actor message receive               |
-| `(*grainPID).handleGrainContext`  | Grain message receive               |
-| `(*actorSystem).handleRemoteTell` | Remote Tell send                    |
-| `(*actorSystem).handleRemoteAsk`  | Remote Ask send                     |
-| `(*PID).process`                  | Actor mailbox loop                  |
-| `(*grainPID).process`             | Grain mailbox loop                  |
-| `(*PID).handleReceivedError`      | Mark doReceive as failed (optional) |
+| Symbol                               | Purpose                             |
+|--------------------------------------|-------------------------------------|
+| `(*PID).doReceive`                   | Actor message receive               |
+| `(*grainPID).handleGrainContext`     | Grain message receive               |
+| `(*actorSystem).handleRemoteTell`    | Remote Tell send                    |
+| `(*actorSystem).handleRemoteAsk`      | Remote Ask send                     |
+| `(*actorSystem).remoteTellHandler`    | Remote Tell receive (TCP)           |
+| `(*actorSystem).remoteAskHandler`     | Remote Ask receive (TCP)            |
+| `(*actorSystem).Spawn`               | Actor system spawn                  |
+| `(*actorSystem).remoteSpawnHandler`   | Remote spawn receive (TCP)          |
+| `(*actorSystem).remoteSpawnChildHandler` | Remote spawn child receive (TCP) |
+| `(*PID).process`                     | Actor mailbox loop                  |
+| `(*PID).SpawnChild`                  | PID spawn child                     |
+| `(*grainPID).process`                | Grain mailbox loop                  |
+| `(*relocator).Relocate`              | Cluster relocation (optional)       |
+| `(*PID).handleReceivedError`         | Mark doReceive as failed (optional) |
 
 ## Dependencies
 

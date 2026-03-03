@@ -1,4 +1,4 @@
-// Copyright (c) 2025 The GoAkt eBPF Authors.
+// Copyright (c) 2026 The GoAkt eBPF Authors.
 // SPDX-License-Identifier: Apache-2.0
 
 // Minimal GoAkt app for goakt-ebpf integration testing.
@@ -44,10 +44,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Tell (fire-and-forget)
+	// Send messages periodically so the agent (which attaches after ~3s) can capture traces.
+	// Initial burst, then every 5s until stopped.
 	actor.Tell(ctx, echo, "hello")
-
-	// Ask (request-response)
 	res, err := actor.Ask(ctx, pong, "ping", 2*time.Second)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Ask:", err)
@@ -55,8 +54,19 @@ func main() {
 		_ = res // "pong"
 	}
 
-	// Run until stopped so goakt-ebpf can attach and capture spans
-	<-ctx.Done()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			actor.Tell(ctx, echo, "hello")
+			if _, err := actor.Ask(ctx, pong, "ping", 2*time.Second); err != nil {
+				fmt.Fprintln(os.Stderr, "Ask:", err)
+			}
+		}
+	}
 }
 
 type echoActor struct{}

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 The GoAkt eBPF Authors.
+// Copyright (c) 2026 The GoAkt eBPF Authors.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Uses patterns and structure from OpenTelemetry Go Instrumentation
@@ -28,12 +28,19 @@ const pkg = "github.com/tochemey/goakt/v4/actor"
 
 // Event type constants (must match C EVENT_TYPE_*)
 const (
-	eventTypeDoReceive      = 1
-	eventTypeRemoteTell     = 2
-	eventTypeRemoteAsk      = 3
-	eventTypeProcess        = 4
-	eventTypeGrainProcess   = 5
-	eventTypeGrainDoReceive = 6
+	eventTypeDoReceive         = 1
+	eventTypeRemoteTell        = 2
+	eventTypeRemoteAsk         = 3
+	eventTypeProcess           = 4
+	eventTypeGrainProcess      = 5
+	eventTypeGrainDoReceive    = 6
+	eventTypeSystemSpawn       = 7
+	eventTypeSpawnChild        = 8
+	eventTypeRemoteSpawn       = 9
+	eventTypeRemoteSpawnChild  = 10
+	eventTypeRemoteTellReceive = 11
+	eventTypeRemoteAskReceive  = 12
+	eventTypeRelocation        = 13
 )
 
 // New returns a new [probe.Probe] for GoAkt actor instrumentation (all targets).
@@ -77,6 +84,42 @@ func New(logger *slog.Logger, version string) probe.Probe {
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).handleGrainContext",
 					EntryProbe:  "uprobe_handleGrainContext",
 					ReturnProbe: "uprobe_handleGrainContext_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).Spawn",
+					EntryProbe:  "uprobe_Spawn",
+					ReturnProbe: "uprobe_Spawn_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).SpawnChild",
+					EntryProbe:  "uprobe_SpawnChild",
+					ReturnProbe: "uprobe_SpawnChild_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteSpawnHandler",
+					EntryProbe:  "uprobe_remoteSpawnHandler",
+					ReturnProbe: "uprobe_remoteSpawnHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteSpawnChildHandler",
+					EntryProbe:  "uprobe_remoteSpawnChildHandler",
+					ReturnProbe: "uprobe_remoteSpawnChildHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteTellHandler",
+					EntryProbe:  "uprobe_remoteTellHandler",
+					ReturnProbe: "uprobe_remoteTellHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteAskHandler",
+					EntryProbe:  "uprobe_remoteAskHandler",
+					ReturnProbe: "uprobe_remoteAskHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*relocator).Relocate",
+					EntryProbe:  "uprobe_Relocate",
+					ReturnProbe: "uprobe_Relocate_Returns",
+					FailureMode: probe.FailureModeWarn, // relocator is unexported; may be absent in some builds
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedError",
@@ -173,6 +216,42 @@ func processFn(e *event) ptrace.SpanSlice {
 			attribute.Bool("messaging.message.handled_successfully", e.HandledSuccessfully != 0),
 		)
 		pdataconv.Attributes(span.Attributes(), attrs...)
+	case eventTypeSystemSpawn:
+		span.SetName("actor.systemSpawn")
+		span.SetKind(ptrace.SpanKindInternal)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn"))...)
+	case eventTypeSpawnChild:
+		span.SetName("actor.spawnChild")
+		span.SetKind(ptrace.SpanKindInternal)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn_child"))...)
+	case eventTypeRemoteSpawn:
+		span.SetName("actor.remoteSpawn")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_spawn"))...)
+	case eventTypeRemoteSpawnChild:
+		span.SetName("actor.remoteSpawnChild")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_spawn_child"))...)
+	case eventTypeRemoteTellReceive:
+		span.SetName("actor.remoteTellReceive")
+		span.SetKind(ptrace.SpanKindConsumer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "receive"),
+			attribute.String("messaging.destination", "actor"),
+			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+		)...)
+	case eventTypeRemoteAskReceive:
+		span.SetName("actor.remoteAskReceive")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "receive"),
+			attribute.String("messaging.destination", "actor"),
+			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+		)...)
+	case eventTypeRelocation:
+		span.SetName("actor.relocation")
+		span.SetKind(ptrace.SpanKindInternal)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "relocation"))...)
 	default:
 		span.SetName("actor.unknown")
 		span.SetKind(ptrace.SpanKindInternal)

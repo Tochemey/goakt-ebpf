@@ -1,4 +1,4 @@
-// Copyright (c) 2025 The GoAkt eBPF Authors.
+// Copyright (c) 2026 The GoAkt eBPF Authors.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Uses patterns and headers from OpenTelemetry Go Instrumentation
@@ -21,6 +21,13 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define EVENT_TYPE_PROCESS 4
 #define EVENT_TYPE_GRAIN_PROCESS 5
 #define EVENT_TYPE_GRAIN_DO_RECEIVE 6
+#define EVENT_TYPE_SYSTEM_SPAWN 7
+#define EVENT_TYPE_SPAWN_CHILD 8
+#define EVENT_TYPE_REMOTE_SPAWN 9
+#define EVENT_TYPE_REMOTE_SPAWN_CHILD 10
+#define EVENT_TYPE_REMOTE_TELL_RECEIVE 11
+#define EVENT_TYPE_REMOTE_ASK_RECEIVE 12
+#define EVENT_TYPE_RELOCATION 13
 
 struct goakt_actor_span_t {
 	u8 event_type;
@@ -75,6 +82,55 @@ struct {
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_grain_do_receive SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_system_spawn SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_spawn_child SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_remote_spawn SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_remote_spawn_child SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_remote_tell_receive SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_remote_ask_receive SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_relocation SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -282,6 +338,181 @@ SEC("uprobe/handleGrainContext_Returns")
 int uprobe_handleGrainContext_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	finish_span_and_output(ctx, key, &goakt_actor_grain_do_receive);
+	return 0;
+}
+
+// --- (*actorSystem).Spawn ---
+SEC("uprobe/Spawn")
+int uprobe_Spawn(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_system_spawn, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SYSTEM_SPAWN,
+			    &goakt_actor_system_spawn);
+	return 0;
+}
+
+SEC("uprobe/Spawn_Returns")
+int uprobe_Spawn_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_system_spawn);
+	return 0;
+}
+
+// --- (*PID).SpawnChild ---
+SEC("uprobe/SpawnChild")
+int uprobe_SpawnChild(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_spawn_child, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SPAWN_CHILD,
+			    &goakt_actor_spawn_child);
+	return 0;
+}
+
+SEC("uprobe/SpawnChild_Returns")
+int uprobe_SpawnChild_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_spawn_child);
+	return 0;
+}
+
+// --- (*actorSystem).remoteSpawnHandler ---
+SEC("uprobe/remoteSpawnHandler")
+int uprobe_remoteSpawnHandler(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_remote_spawn, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_SPAWN,
+			    &goakt_actor_remote_spawn);
+	return 0;
+}
+
+SEC("uprobe/remoteSpawnHandler_Returns")
+int uprobe_remoteSpawnHandler_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_remote_spawn);
+	return 0;
+}
+
+// --- (*actorSystem).remoteSpawnChildHandler ---
+SEC("uprobe/remoteSpawnChildHandler")
+int uprobe_remoteSpawnChildHandler(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_remote_spawn_child, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_SPAWN_CHILD,
+			    &goakt_actor_remote_spawn_child);
+	return 0;
+}
+
+SEC("uprobe/remoteSpawnChildHandler_Returns")
+int uprobe_remoteSpawnChildHandler_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_remote_spawn_child);
+	return 0;
+}
+
+// --- (*actorSystem).remoteTellHandler ---
+SEC("uprobe/remoteTellHandler")
+int uprobe_remoteTellHandler(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_remote_tell_receive, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_TELL_RECEIVE,
+			    &goakt_actor_remote_tell_receive);
+	return 0;
+}
+
+SEC("uprobe/remoteTellHandler_Returns")
+int uprobe_remoteTellHandler_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_remote_tell_receive);
+	return 0;
+}
+
+// --- (*actorSystem).remoteAskHandler ---
+SEC("uprobe/remoteAskHandler")
+int uprobe_remoteAskHandler(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_remote_ask_receive, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ASK_RECEIVE,
+			    &goakt_actor_remote_ask_receive);
+	return 0;
+}
+
+SEC("uprobe/remoteAskHandler_Returns")
+int uprobe_remoteAskHandler_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_remote_ask_receive);
+	return 0;
+}
+
+// --- (*relocator).Relocate ---
+SEC("uprobe/Relocate")
+int uprobe_Relocate(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_relocation, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_RELOCATION,
+			    &goakt_actor_relocation);
+	return 0;
+}
+
+SEC("uprobe/Relocate_Returns")
+int uprobe_Relocate_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_relocation);
 	return 0;
 }
 

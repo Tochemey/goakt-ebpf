@@ -1,5 +1,8 @@
 //go:build !linux
 
+// Copyright (c) 2026 The GoAkt eBPF Authors.
+// SPDX-License-Identifier: Apache-2.0
+
 package process
 
 import "errors"

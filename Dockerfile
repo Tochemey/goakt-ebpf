@@ -2,20 +2,21 @@
 # Production Dockerfile for goakt-ebpf eBPF tracing agent
 # Build: docker build -t goakt-ebpf .
 # Run:  docker run --cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON --pid=container:TARGET goakt-ebpf -pid 1
+#
+# Base stage: used by docker-test for cross-platform testing (make docker-test, ./scripts/docker-test.sh)
+# -----------------------------------------------------------------------------
+# Stage 0: Base (Go + eBPF build tools for generate/test)
+# -----------------------------------------------------------------------------
+FROM golang:1.26-bookworm AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang llvm linux-headers-generic ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.20.0
 
 # -----------------------------------------------------------------------------
 # Stage 1: Build
 # -----------------------------------------------------------------------------
-FROM golang:1.26-bookworm AS builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    clang \
-    llvm \
-    linux-headers-generic \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.20.0
+FROM base AS builder
 
 WORKDIR /build
 

@@ -1,6 +1,6 @@
 //go:build linux
 
-// Copyright (c) 2025 The GoAkt eBPF Authors.
+// Copyright (c) 2026 The GoAkt eBPF Authors.
 // SPDX-License-Identifier: Apache-2.0
 
 // Package main is the entry point for the goakt-ebpf agent.
