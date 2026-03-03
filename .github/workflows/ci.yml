@@ -162,14 +162,15 @@ jobs:
           COMPOSE_DOCKER_CLI_BUILD: 1
 
       - name: Wait for agent and traces
-        run: sleep 20
+        run: sleep 30
 
       - name: Verify agent attached
         run: |
           LOGS=$(docker compose -f examples/integration/docker-compose.yml -f examples/integration/docker-compose.ci.yml logs goakt-ebpf 2>&1)
           if echo "$LOGS" | grep -q "operation not permitted"; then
-            echo "::warning::eBPF not supported on this runner - agent could not attach. Stack started OK."
-            echo "See https://keploy.io/blog/community/executing-ebpf-in-github-actions"
+            echo "::error::Agent failed to attach (eBPF not supported on this runner)"
+            echo "$LOGS"
+            exit 1
           else
             echo "Agent attached successfully"
           fi
@@ -180,7 +181,15 @@ jobs:
           if echo "$TRACES" | grep -qE '"data":\s*\[[^]]+'; then
             echo "Traces found in Jaeger - integration OK"
           else
-            echo "No traces yet. Response: ${TRACES:0:300}"
+            echo "::error::No traces in Jaeger - pipeline or agent may be broken"
+            echo "Response: $TRACES"
+            echo ""
+            echo "=== goakt-ebpf agent logs ==="
+            docker compose -f examples/integration/docker-compose.yml -f examples/integration/docker-compose.ci.yml logs goakt-ebpf 2>&1
+            echo ""
+            echo "=== otel-collector logs ==="
+            docker compose -f examples/integration/docker-compose.yml -f examples/integration/docker-compose.ci.yml logs otel-collector 2>&1 | tail -30
+            exit 1
           fi
 
       - name: Cleanup
