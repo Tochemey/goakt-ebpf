@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -46,17 +47,28 @@ func main() {
 		service = s
 	}
 	limit := 20
-	url := fmt.Sprintf("%s/api/traces?service=%s&limit=%d", baseURL, service, limit)
-
-	resp, err := http.Get(url)
+	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=%d", baseURL, service, limit)
+	parsedURL, err := url.ParseRequestURI(rawURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: %v\n", url, err)
+		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: invalid URL %q: %v\n", rawURL, err)
+		os.Exit(1)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: build request: %v\n", err)
+		os.Exit(1)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: %v\n", parsedURL, err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: status %d\n", url, resp.StatusCode)
+		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: status %d\n", parsedURL, resp.StatusCode)
 		os.Exit(1)
 	}
 
@@ -71,11 +83,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Expected span names from integration app (Tell/Ask between echo and pong)
+	// Expected span names from integration app (Tell/Ask between echo and pong).
+	// actor.systemSpawn is excluded: Spawn is called before the agent attaches,
+	// so those spans are not captured by the eBPF probes.
 	expectedNames := map[string]bool{
-		"actor.systemSpawn": true,
-		"actor.doReceive":   true,
-		"actor.process":     true,
+		"actor.doReceive": true,
+		"actor.process":   true,
 	}
 
 	foundNames := make(map[string]bool)

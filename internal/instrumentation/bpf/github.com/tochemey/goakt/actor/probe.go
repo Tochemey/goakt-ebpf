@@ -284,43 +284,57 @@ func processFn(e *event) ptrace.SpanSlice {
 		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
 	}
 
-	// Timestamp and success attributes for messaging spans.
 	// Future: add actor.sender.id, actor.receiver.id, actor.system.name via StructFieldConst
 	// (requires DWARF offsets from ReceiveContext.sender, ReceiveContext.self, PID.path, path.system, path.name).
-	sentTs := kernel.BootOffsetToTimestamp(e.StartTime)
-	receivedTs := kernel.BootOffsetToTimestamp(e.StartTime)
-	handledTs := kernel.BootOffsetToTimestamp(e.EndTime)
+	ts := eventTimestamps{
+		sent:     kernel.BootOffsetToTimestamp(e.StartTime),
+		received: kernel.BootOffsetToTimestamp(e.StartTime),
+		handled:  kernel.BootOffsetToTimestamp(e.EndTime),
+		success:  e.HandledSuccessfully != 0,
+	}
 
-	switch e.EventType {
+	switch {
+	case applyLocalSpan(e.EventType, span, ts):
+	case applySpawnSpan(e.EventType, span):
+	case applyRemoteSpan(e.EventType, span, ts):
+	default:
+		span.SetName("actor.unknown")
+		span.SetKind(ptrace.SpanKindInternal)
+		pdataconv.Attributes(span.Attributes(), baseAttrs...)
+	}
+
+	return spans
+}
+
+type eventTimestamps struct {
+	sent, received, handled pcommon.Timestamp
+	success                 bool
+}
+
+// applyLocalSpan handles local actor messaging and processing spans.
+// Returns true if the event type was handled.
+func applyLocalSpan(et uint8, span ptrace.Span, ts eventTimestamps) bool {
+	switch et {
 	case eventTypeDoReceive:
 		span.SetName("actor.doReceive")
 		span.SetKind(ptrace.SpanKindConsumer)
-		attrs := append(baseAttrs,
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "receive"),
 			attribute.String("messaging.destination", "actor"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
-			attribute.Int64("messaging.message.handled_timestamp", int64(handledTs)),
-			attribute.Bool("messaging.message.handled_successfully", e.HandledSuccessfully != 0),
-		)
-		pdataconv.Attributes(span.Attributes(), attrs...)
-	case eventTypeRemoteTell:
-		span.SetName("actor.remoteTell")
-		span.SetKind(ptrace.SpanKindProducer)
-		attrs := append(baseAttrs,
-			attribute.String("messaging.operation", "send"),
-			attribute.String("messaging.destination", "actor"),
-			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
-		)
-		pdataconv.Attributes(span.Attributes(), attrs...)
-	case eventTypeRemoteAsk:
-		span.SetName("actor.remoteAsk")
-		span.SetKind(ptrace.SpanKindClient)
-		attrs := append(baseAttrs,
-			attribute.String("messaging.operation", "request"),
-			attribute.String("messaging.destination", "actor"),
-			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
-		)
-		pdataconv.Attributes(span.Attributes(), attrs...)
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
+			attribute.Int64("messaging.message.handled_timestamp", int64(ts.handled)),
+			attribute.Bool("messaging.message.handled_successfully", ts.success),
+		)...)
+	case eventTypeGrainDoReceive:
+		span.SetName("actor.grainDoReceive")
+		span.SetKind(ptrace.SpanKindConsumer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "receive"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
+			attribute.Int64("messaging.message.handled_timestamp", int64(ts.handled)),
+			attribute.Bool("messaging.message.handled_successfully", ts.success),
+		)...)
 	case eventTypeProcess:
 		span.SetName("actor.process")
 		span.SetKind(ptrace.SpanKindInternal)
@@ -329,44 +343,68 @@ func processFn(e *event) ptrace.SpanSlice {
 		span.SetName("actor.grainProcess")
 		span.SetKind(ptrace.SpanKindInternal)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.type", "grain"))...)
-	case eventTypeGrainDoReceive:
-		span.SetName("actor.grainDoReceive")
-		span.SetKind(ptrace.SpanKindConsumer)
-		attrs := append(baseAttrs,
-			attribute.String("messaging.operation", "receive"),
-			attribute.String("messaging.destination", "grain"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
-			attribute.Int64("messaging.message.handled_timestamp", int64(handledTs)),
-			attribute.Bool("messaging.message.handled_successfully", e.HandledSuccessfully != 0),
-		)
-		pdataconv.Attributes(span.Attributes(), attrs...)
-	case eventTypeSystemSpawn:
-		span.SetName("actor.systemSpawn")
+	case eventTypeRelocation:
+		span.SetName("actor.relocation")
 		span.SetKind(ptrace.SpanKindInternal)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn"))...)
-	case eventTypeSpawnOn:
-		span.SetName("actor.spawnOn")
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "relocation"))...)
+	default:
+		return false
+	}
+	return true
+}
+
+// applySpawnSpan handles spawn lifecycle spans (local and remote placement).
+// Returns true if the event type was handled.
+func applySpawnSpan(et uint8, span ptrace.Span) bool {
+	type spawnDef struct {
+		name string
+		kind ptrace.SpanKind
+		op   string
+	}
+	defs := map[uint8]spawnDef{
+		eventTypeSystemSpawn:      {"actor.systemSpawn", ptrace.SpanKindInternal, "spawn"},
+		eventTypeSpawnOn:          {"actor.spawnOn", ptrace.SpanKindClient, "spawn_on"},
+		eventTypeSpawnChild:       {"actor.spawnChild", ptrace.SpanKindInternal, "spawn_child"},
+		eventTypeRemoteSpawn:      {"actor.remoteSpawn", ptrace.SpanKindServer, "remote_spawn"},
+		eventTypeRemoteSpawnChild: {"actor.remoteSpawnChild", ptrace.SpanKindServer, "remote_spawn_child"},
+	}
+	d, ok := defs[et]
+	if !ok {
+		return false
+	}
+	span.SetName(d.name)
+	span.SetKind(d.kind)
+	pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", d.op))...)
+	return true
+}
+
+// applyRemoteSpan handles remote messaging and inspection handler spans.
+// Returns true if the event type was handled.
+func applyRemoteSpan(et uint8, span ptrace.Span, ts eventTimestamps) bool { //nolint:cyclop
+	switch et {
+	case eventTypeRemoteTell:
+		span.SetName("actor.remoteTell")
+		span.SetKind(ptrace.SpanKindProducer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "send"),
+			attribute.String("messaging.destination", "actor"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
+		)...)
+	case eventTypeRemoteAsk:
+		span.SetName("actor.remoteAsk")
 		span.SetKind(ptrace.SpanKindClient)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn_on"))...)
-	case eventTypeSpawnChild:
-		span.SetName("actor.spawnChild")
-		span.SetKind(ptrace.SpanKindInternal)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn_child"))...)
-	case eventTypeRemoteSpawn:
-		span.SetName("actor.remoteSpawn")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_spawn"))...)
-	case eventTypeRemoteSpawnChild:
-		span.SetName("actor.remoteSpawnChild")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_spawn_child"))...)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "request"),
+			attribute.String("messaging.destination", "actor"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
+		)...)
 	case eventTypeRemoteTellReceive:
 		span.SetName("actor.remoteTellReceive")
 		span.SetKind(ptrace.SpanKindConsumer)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "receive"),
 			attribute.String("messaging.destination", "actor"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
 		)...)
 	case eventTypeRemoteAskReceive:
 		span.SetName("actor.remoteAskReceive")
@@ -374,19 +412,15 @@ func processFn(e *event) ptrace.SpanSlice {
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "receive"),
 			attribute.String("messaging.destination", "actor"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
 		)...)
-	case eventTypeRelocation:
-		span.SetName("actor.relocation")
-		span.SetKind(ptrace.SpanKindInternal)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "relocation"))...)
 	case eventTypeRemoteTellGrain:
 		span.SetName("actor.remoteTellGrain")
 		span.SetKind(ptrace.SpanKindProducer)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "send"),
 			attribute.String("messaging.destination", "grain"),
-			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
 		)...)
 	case eventTypeRemoteAskGrain:
 		span.SetName("actor.remoteAskGrain")
@@ -394,27 +428,15 @@ func processFn(e *event) ptrace.SpanSlice {
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "request"),
 			attribute.String("messaging.destination", "grain"),
-			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
 		)...)
-	case eventTypeRemoteLookup:
-		span.SetName("actor.remoteLookup")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_lookup"))...)
-	case eventTypeRemoteReSpawn:
-		span.SetName("actor.remoteReSpawn")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_respawn"))...)
-	case eventTypeRemoteStop:
-		span.SetName("actor.remoteStop")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_stop"))...)
 	case eventTypeRemoteAskGrainReceive:
 		span.SetName("actor.remoteAskGrainReceive")
 		span.SetKind(ptrace.SpanKindServer)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "receive"),
 			attribute.String("messaging.destination", "grain"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
 		)...)
 	case eventTypeRemoteTellGrainReceive:
 		span.SetName("actor.remoteTellGrainReceive")
@@ -422,57 +444,43 @@ func processFn(e *event) ptrace.SpanSlice {
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "receive"),
 			attribute.String("messaging.destination", "grain"),
-			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+			attribute.Int64("messaging.message.received_timestamp", int64(ts.received)),
 		)...)
-	case eventTypeRemoteActivateGrain:
-		span.SetName("actor.remoteActivateGrain")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_activate_grain"))...)
-	case eventTypeRemoteReinstate:
-		span.SetName("actor.remoteReinstate")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_reinstate"))...)
-	case eventTypeRemotePassivationStrategy:
-		span.SetName("actor.remotePassivationStrategy")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_passivation_strategy"))...)
-	case eventTypeRemoteState:
-		span.SetName("actor.remoteState")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_state"))...)
-	case eventTypeRemoteChildren:
-		span.SetName("actor.remoteChildren")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_children"))...)
-	case eventTypeRemoteParent:
-		span.SetName("actor.remoteParent")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_parent"))...)
-	case eventTypeRemoteKind:
-		span.SetName("actor.remoteKind")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_kind"))...)
-	case eventTypeRemoteDependencies:
-		span.SetName("actor.remoteDependencies")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_dependencies"))...)
-	case eventTypeRemoteMetric:
-		span.SetName("actor.remoteMetric")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_metric"))...)
-	case eventTypeRemoteRole:
-		span.SetName("actor.remoteRole")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_role"))...)
-	case eventTypeRemoteStashSize:
-		span.SetName("actor.remoteStashSize")
-		span.SetKind(ptrace.SpanKindServer)
-		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_stash_size"))...)
 	default:
-		span.SetName("actor.unknown")
-		span.SetKind(ptrace.SpanKindInternal)
-		pdataconv.Attributes(span.Attributes(), baseAttrs...)
+		return applyRemoteOpSpan(et, span)
 	}
+	return true
+}
 
-	return spans
+// applyRemoteOpSpan handles remote operation handler spans (lookup, stop, inspect, etc.).
+// Returns true if the event type was handled.
+func applyRemoteOpSpan(et uint8, span ptrace.Span) bool {
+	type opDef struct {
+		name string
+		op   string
+	}
+	defs := map[uint8]opDef{
+		eventTypeRemoteLookup:              {"actor.remoteLookup", "remote_lookup"},
+		eventTypeRemoteReSpawn:             {"actor.remoteReSpawn", "remote_respawn"},
+		eventTypeRemoteStop:                {"actor.remoteStop", "remote_stop"},
+		eventTypeRemoteActivateGrain:       {"actor.remoteActivateGrain", "remote_activate_grain"},
+		eventTypeRemoteReinstate:           {"actor.remoteReinstate", "remote_reinstate"},
+		eventTypeRemotePassivationStrategy: {"actor.remotePassivationStrategy", "remote_passivation_strategy"},
+		eventTypeRemoteState:               {"actor.remoteState", "remote_state"},
+		eventTypeRemoteChildren:            {"actor.remoteChildren", "remote_children"},
+		eventTypeRemoteParent:              {"actor.remoteParent", "remote_parent"},
+		eventTypeRemoteKind:                {"actor.remoteKind", "remote_kind"},
+		eventTypeRemoteDependencies:        {"actor.remoteDependencies", "remote_dependencies"},
+		eventTypeRemoteMetric:              {"actor.remoteMetric", "remote_metric"},
+		eventTypeRemoteRole:                {"actor.remoteRole", "remote_role"},
+		eventTypeRemoteStashSize:           {"actor.remoteStashSize", "remote_stash_size"},
+	}
+	d, ok := defs[et]
+	if !ok {
+		return false
+	}
+	span.SetName(d.name)
+	span.SetKind(ptrace.SpanKindServer)
+	pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", d.op))...)
+	return true
 }

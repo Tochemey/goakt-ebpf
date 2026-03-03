@@ -140,7 +140,7 @@ The app sends Tell and Ask messages every 5 seconds (so the agent, which attache
 
 The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger:
 
-- **Expected span names:** `actor.systemSpawn`, `actor.doReceive`, `actor.process` (from spawn, Tell/Ask, and message handling)
+- **Expected span names:** `actor.doReceive`, `actor.process` (from Tell/Ask and message handling; `actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
 - **Minimum span count:** ≥ 4 spans across all traces
 - **Parent propagation:** Spans with `CHILD_OF` references have their parent span present in the same trace
 
