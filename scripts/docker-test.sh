@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Run tests inside Docker (works on macOS, Windows, Linux).
 # eBPF requires Linux; this script enables cross-platform development.
-# See docs/INSTRUMENTATION_PLAN.md#part-2-cross-platform-testing-via-docker
-
 set -e
 
 cd "$(dirname "$0")/.."

@@ -213,7 +213,6 @@ The agent attaches to your GoAkt process, captures actor activity as it happens,
 ## 📚 Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Instrumentation Plan](docs/INSTRUMENTATION_PLAN.md) — New probes and cross-platform testing via Docker
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 
