@@ -5,7 +5,7 @@ End-to-end example for goakt-ebpf using Docker Compose. Run this locally to veri
 ## Prerequisites
 
 - Docker and Docker Compose
-- Linux host (eBPF requires Linux; Docker Desktop on macOS/Windows uses a Linux VM)
+- **Linux host** — eBPF requires a Linux kernel. Docker Desktop on macOS/Windows uses a Linux VM that typically does not support eBPF; you may see `operation not permitted` when attaching to the target process.
 
 ## Quick Start
 
@@ -33,13 +33,36 @@ The app sends Tell and Ask messages on startup. Spans should appear within a few
 ## Architecture
 
 ```
-┌─────────────┐     eBPF uprobes      ┌─────────────┐     OTLP HTTP      ┌──────────────────┐     OTLP gRPC     ┌────────┐
-│ goakt-ebpf  │ ◄──────────────────── │  goakt-app   │                    │ otel-collector   │ ─────────────────► │ Jaeger │
-│   agent     │   (shared PID ns)     │  (PID 1)     │                    │                  │                    │        │
-└─────────────┘                       └─────────────┘                    └──────────────────┘                    └────────┘
+    ┌─────────────────┐
+    │   goakt-app     │
+    │   (PID 1)       │
+    └────────┬────────┘
+             │ eBPF uprobes (shared PID ns)
+             ▼
+    ┌─────────────────┐
+    │  goakt-ebpf     │
+    │     agent       │
+    └────────┬────────┘
+             │ OTLP HTTP
+             ▼
+    ┌─────────────────┐
+    │ otel-collector  │
+    └────────┬────────┘
+             │ OTLP gRPC
+             ▼
+    ┌─────────────────┐
+    │     Jaeger      │
+    └─────────────────┘
 ```
 
 The agent runs in the same PID namespace as the app (`pid: "container:goakt-app"`) so it can attach uprobes.
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `invalid PID 1: operation not permitted` | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Run on a Linux host |
+| `operation not permitted` when attaching | Insufficient capabilities | The compose file uses `privileged: true`; ensure Docker has permission |
 
 ## Cleanup
 

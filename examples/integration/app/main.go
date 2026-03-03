@@ -55,8 +55,8 @@ func main() {
 		_ = res // "pong"
 	}
 
-	// Run for a few seconds so goakt-ebpf can attach and capture spans
-	time.Sleep(5 * time.Second)
+	// Run until stopped so goakt-ebpf can attach and capture spans
+	<-ctx.Done()
 }
 
 type echoActor struct{}

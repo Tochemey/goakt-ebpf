@@ -38,15 +38,12 @@ services:
     tty: true
 
   # goakt-ebpf agent - attaches to goakt-app, exports traces to collector
+  # Requires Linux host (eBPF does not work in Docker Desktop on macOS/Windows)
   goakt-ebpf:
     build:
       context: ../..
       dockerfile: Dockerfile
-    cap_add:
-      - SYS_PTRACE
-      - SYS_ADMIN
-      - BPF
-      - PERFMON
+    privileged: true  # Required for eBPF uprobe attachment to target process
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
@@ -56,8 +53,8 @@ services:
     pid: "container:goakt-app"  # Share PID namespace to attach to app
     networks:
       - goakt-ebpf-net
-    # Args for entrypoint: -pid 1 (app is PID 1 in shared PID namespace)
-    command: ["-pid", "1"]
+    # Wait for goakt-app to be ready, then attach (app is PID 1 in shared PID namespace)
+    entrypoint: ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]
 
 networks:
   goakt-ebpf-net:
