@@ -176,19 +176,11 @@ jobs:
 
       - name: Verify traces in Jaeger
         run: |
-          # Jaeger Query API - check for goakt-ebpf service and traces
-          SERVICES=$(curl -sf "http://localhost:16686/api/services" 2>/dev/null || echo "[]")
-          if echo "$SERVICES" | grep -q "goakt-ebpf"; then
-            echo "Service goakt-ebpf found in Jaeger"
-          else
-            echo "Service not found. Response: $SERVICES"
-          fi
           TRACES=$(curl -sf "http://localhost:16686/api/traces?service=goakt-ebpf&limit=1" 2>/dev/null || echo "{}")
-          if echo "$TRACES" | grep -q '"data"'; then
+          if echo "$TRACES" | grep -qE '"data":\s*\[[^]]+'; then
             echo "Traces found in Jaeger - integration OK"
           else
-            echo "No traces yet (may need more time). Traces response: ${TRACES:0:200}"
-            # Don't fail - traces can be delayed; agent attach is the critical check
+            echo "No traces yet. Response: ${TRACES:0:300}"
           fi
 
       - name: Cleanup
