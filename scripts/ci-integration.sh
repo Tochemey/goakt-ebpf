@@ -41,14 +41,16 @@ APP_PID=$!
 sleep 3
 
 echo "=== Starting agent (attach to PID $APP_PID) ==="
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
-OTEL_SERVICE_NAME=goakt-ebpf \
-sudo -E /tmp/goakt-ebpf -pid $APP_PID &
+# Use `sudo env` to explicitly pass OTEL vars - sudo env_reset strips them even with -E.
+sudo env \
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+  OTEL_SERVICE_NAME=goakt-ebpf \
+  /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
 
-echo "=== Waiting for traces (30s) ==="
-sleep 30
+echo "=== Waiting for traces (60s) ==="
+sleep 60
 
 echo "=== Verifying traces in Jaeger ==="
 TRACES=$(curl -sf "http://localhost:16686/api/traces?service=goakt-ebpf&limit=1" 2>/dev/null || echo "{}")
