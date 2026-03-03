@@ -21,8 +21,8 @@ docker compose -f examples/integration/docker-compose.backend.yml up -d
 sleep 5
 
 echo "=== Building integration app ==="
-cd examples/integration
-go build -o /tmp/integration-app ./app/
+cd examples/integration/app
+go build -o /tmp/integration-app .
 cd "$ROOT"
 
 echo "=== Installing BPF tools and generating ==="
