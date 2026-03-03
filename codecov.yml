@@ -1,0 +1,13 @@
+# Codecov configuration for goakt-ebpf
+# Excludes C/BPF code and non-testable paths from coverage reporting
+coverage:
+  ignore:
+    # C/BPF: Generated Go wrappers for BPF bytecode (probe.bpf.c)
+    - "internal/instrumentation/bpf/**"
+    # Entry points and utilities (not unit-testable)
+    - "cmd/**"
+    - "examples/**"
+    - "scripts/**"
+    # Platform-specific: Linux eBPF/ptrace only, not unit-testable without root
+    - "internal/process/binary/**"
+    - "internal/instrumentation/bpffs/**"

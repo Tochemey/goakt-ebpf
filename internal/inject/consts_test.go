@@ -73,3 +73,42 @@ func TestWithOffset(t *testing.T) {
 	_, err = newConsts(opts)
 	assert.ErrorIs(t, err, errNotFound)
 }
+
+func TestWithKeyValue(t *testing.T) {
+	const key, val = "test_key", uint64(42)
+	opts := []Option{WithKeyValue(key, val)}
+	got, err := newConsts(opts)
+	require.NoError(t, err)
+	require.Contains(t, got, key)
+	assert.Equal(t, val, got[key])
+}
+
+func TestGetOffset(t *testing.T) {
+	id := structfield.NewID("std", "net/http", "Request", "Method")
+	v := semver.MustParse("1.19.0")
+	off, ok := GetOffset(id, v)
+	assert.True(t, ok)
+	assert.True(t, off.Valid)
+	assert.Equal(t, uint64(0), off.Offset)
+}
+
+func TestGetOffsetNotFound(t *testing.T) {
+	id := structfield.NewID("nonexistent", "pkg", "Struct", "Field")
+	v := semver.MustParse("1.0.0")
+	_, ok := GetOffset(id, v)
+	assert.False(t, ok)
+}
+
+func TestGetLatestOffset(t *testing.T) {
+	id := structfield.NewID("std", "net/http", "Request", "Method")
+	off, ver := GetLatestOffset(id)
+	assert.True(t, off.Valid)
+	assert.NotNil(t, ver)
+}
+
+func TestGetLatestOffsetNotFound(t *testing.T) {
+	id := structfield.NewID("nonexistent", "pkg", "Struct", "Field")
+	off, ver := GetLatestOffset(id)
+	assert.False(t, off.Valid)
+	assert.Nil(t, ver)
+}

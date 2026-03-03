@@ -288,3 +288,160 @@ func TestControllerTraceConcurrentSafe(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestNewHandler(t *testing.T) {
+	ctx := context.Background()
+	handler, err := NewHandler(ctx, WithServiceName("test"), WithTraceExporter(newExporter()))
+	require.NoError(t, err)
+	require.NotNil(t, handler)
+	require.NotNil(t, handler.TraceHandler)
+}
+
+func TestTraceHandlerDropsInvalidSpans(t *testing.T) {
+	ctx := context.Background()
+	exp := newExporter()
+	handler, err := NewTraceHandler(ctx, WithTraceExporter(exp), WithServiceName(service))
+	require.NoError(t, err)
+
+	scope := pcommon.NewInstrumentationScope()
+	scope.SetName("test")
+
+	// Span with empty TraceID - should be dropped
+	spans := ptrace.NewSpanSlice()
+	span := spans.AppendEmpty()
+	span.SetName("invalid")
+	span.SetSpanID(pcommon.SpanID{0x1})
+	// TraceID is empty by default
+	handler.HandleTrace(scope, "", spans)
+
+	// Span with empty SpanID - should be dropped
+	spans2 := ptrace.NewSpanSlice()
+	span2 := spans2.AppendEmpty()
+	span2.SetName("invalid2")
+	span2.SetTraceID(pcommon.TraceID{0x1})
+	// SpanID is empty by default
+	handler.HandleTrace(scope, "", spans2)
+
+	require.NoError(t, handler.Shutdown(ctx))
+	got := exp.GetSpans()
+	assert.Empty(t, got)
+}
+
+func TestTraceHandlerStatusCodes(t *testing.T) {
+	ctx := context.Background()
+	exp := newExporter()
+	handler, err := NewTraceHandler(ctx, WithTraceExporter(exp), WithServiceName(service))
+	require.NoError(t, err)
+
+	scope := pcommon.NewInstrumentationScope()
+	scope.SetName("test")
+
+	for _, tc := range []struct {
+		code    ptrace.StatusCode
+		message string
+	}{
+		{ptrace.StatusCodeUnset, ""},
+		{ptrace.StatusCodeOk, "success"},
+		{ptrace.StatusCodeError, "error message"},
+	} {
+		spans := ptrace.NewSpanSlice()
+		span := spans.AppendEmpty()
+		span.SetName("test")
+		span.SetTraceID(pcommon.TraceID{0x1})
+		span.SetSpanID(pcommon.SpanID{0x1})
+		span.Status().SetCode(tc.code)
+		span.Status().SetMessage(tc.message)
+		span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(0, 0).UTC()))
+		span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(1, 0).UTC()))
+
+		handler.HandleTrace(scope, "", spans)
+	}
+
+	require.NoError(t, handler.Shutdown(ctx))
+	got := exp.GetSpans()
+	assert.Len(t, got, 3)
+}
+
+func TestTraceHandlerDropsAfterShutdown(t *testing.T) {
+	ctx := context.Background()
+	exp := newExporter()
+	handler, err := NewTraceHandler(ctx, WithTraceExporter(exp), WithServiceName(service))
+	require.NoError(t, err)
+
+	require.NoError(t, handler.Shutdown(ctx))
+
+	// HandleTrace after shutdown should drop
+	scope := pcommon.NewInstrumentationScope()
+	spans := ptrace.NewSpanSlice()
+	span := spans.AppendEmpty()
+	span.SetName("test")
+	span.SetTraceID(pcommon.TraceID{0x1})
+	span.SetSpanID(pcommon.SpanID{0x1})
+	handler.HandleTrace(scope, "", spans)
+
+	got := exp.GetSpans()
+	assert.Empty(t, got)
+}
+
+func TestTraceHandlerWithParentSpan(t *testing.T) {
+	ctx := context.Background()
+	exp := newExporter()
+	handler, err := NewTraceHandler(ctx, WithTraceExporter(exp), WithServiceName(service))
+	require.NoError(t, err)
+
+	scope := pcommon.NewInstrumentationScope()
+	scope.SetName("test")
+	spans := ptrace.NewSpanSlice()
+	span := spans.AppendEmpty()
+	span.SetName("child")
+	span.SetTraceID(pcommon.TraceID{0x1})
+	span.SetSpanID(pcommon.SpanID{0x2})
+	span.SetParentSpanID(pcommon.SpanID{0x1})
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(0, 0).UTC()))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(1, 0).UTC()))
+
+	handler.HandleTrace(scope, "", spans)
+	require.NoError(t, handler.Shutdown(ctx))
+
+	got := exp.GetSpans()
+	assert.Len(t, got, 1)
+}
+
+// TestTraceHandlerSpanKinds exercises all span kind conversions (spanKind function).
+func TestTraceHandlerSpanKinds(t *testing.T) {
+	const schemaURL = "http://localhost/1.0.0"
+	scope := pcommon.NewInstrumentationScope()
+	scope.SetName("test")
+	scope.SetVersion("v1")
+
+	spanKinds := []ptrace.SpanKind{
+		ptrace.SpanKindInternal,
+		ptrace.SpanKindServer,
+		ptrace.SpanKindClient,
+		ptrace.SpanKindProducer,
+		ptrace.SpanKindConsumer,
+		ptrace.SpanKindUnspecified,
+	}
+
+	ctx := context.Background()
+	exp := newExporter()
+	handler, err := NewTraceHandler(ctx, WithTraceExporter(exp), WithServiceName(service))
+	require.NoError(t, err)
+
+	for i, kind := range spanKinds {
+		spans := ptrace.NewSpanSlice()
+		span := spans.AppendEmpty()
+		span.SetName("span-" + fmt.Sprintf("%d", i))
+		span.SetTraceID(pcommon.TraceID{0x1})
+		span.SetSpanID(pcommon.SpanID{0x1})
+		span.SetKind(kind)
+		span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(0, 0).UTC()))
+		span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(1, 0).UTC()))
+
+		handler.HandleTrace(scope, schemaURL, spans)
+	}
+
+	require.NoError(t, handler.Shutdown(ctx))
+	got := exp.GetSpans()
+	assert.Len(t, got, len(spanKinds))
+}
