@@ -161,4 +161,4 @@ jobs:
           cache-dependency-path: "**/*.sum"
 
       - name: Run integration test (host-based)
-        run: ./scripts/ci-integration.sh
+        run: bash scripts/ci-integration.sh
