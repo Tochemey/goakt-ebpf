@@ -53,11 +53,13 @@ echo "=== Waiting for traces (60s) ==="
 sleep 60
 
 echo "=== Verifying traces in Jaeger ==="
+SERVICES=$(curl -sf "http://localhost:16686/api/services" 2>/dev/null || echo '{"data":[]}')
+echo "Jaeger services: $SERVICES"
 TRACES=$(curl -sf "http://localhost:16686/api/traces?service=goakt-ebpf&limit=1" 2>/dev/null || echo "{}")
 if echo "$TRACES" | grep -qE '"data":\s*\[[^]]+'; then
   echo "Traces found in Jaeger - integration OK"
 else
-  echo "No traces in Jaeger. Response: $TRACES"
+  echo "No traces in Jaeger for service=goakt-ebpf. Response: $TRACES"
   exit 1
 fi
 
