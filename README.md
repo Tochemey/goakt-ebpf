@@ -9,15 +9,15 @@
 
 eBPF tracing agent for [GoAkt](https://github.com/tochemey/goakt) — zero-instrumentation tracing of actor message flow, remoting, and grains.
 
-## Overview
+## 📖 Overview
 
 goakt-ebpf attaches to running GoAkt applications and observes actor message handling, remote Tell/Ask, and grain processing without any code changes or redeployment. The agent runs as a sidecar process and exports traces via OpenTelemetry Protocol (OTLP), so you can visualize spans in Jaeger, Grafana Tempo, or any OTLP-compatible backend.
 
-## What is eBPF?
+## 💡 What is eBPF?
 
 **eBPF** (extended Berkeley Packet Filter) is a Linux kernel technology that allows running sandboxed programs in the kernel without changing kernel source code or loading modules. For goakt-ebpf, we use **uprobes** — user-space probes that attach to function entry and exit points in the target process. When a GoAkt application handles a message, the eBPF program runs in kernel space, records timestamps and IDs, and sends events to userspace via a perf buffer. This approach is safe, low-overhead, and requires no instrumentation in your application code.
 
-## OpenTelemetry Integration
+## 📡 OpenTelemetry Integration
 
 goakt-ebpf is built for the OpenTelemetry ecosystem. The agent:
 
@@ -32,7 +32,7 @@ You run the agent alongside your GoAkt app, point it at an OTLP endpoint, and tr
 - **Linux** — eBPF is a Linux kernel feature. The agent does not run on macOS or Windows (Docker Desktop’s Linux VM typically does not support eBPF).
 - **Go 1.26+** — For building from source.
 
-## Features
+## ✨ Features
 
 - **Zero instrumentation** — No code changes, no redeployment. Attach to any GoAkt v4 process.
 - **Actor-level spans** — Traces for `doReceive`, `process`, remote Tell/Ask, and grain handling.
@@ -58,7 +58,7 @@ docker run --rm \
 
 When sharing PID namespace with a container, the target process is typically PID 1. See [Deployment](#-deployment) for Kubernetes and other environments.
 
-## Configuration
+## ⚙️ Configuration
 
 ### Flags
 
@@ -101,7 +101,7 @@ make view     # Opens Jaeger UI
 
 Or: `docker compose -f examples/integration/docker-compose.yml up --build`. **On macOS:** use [Lima](https://github.com/lima-vm/lima) instead of Docker Desktop (eBPF requires a Linux kernel). See [examples/integration/README.md](examples/integration/README.md) for step-by-step Lima setup.
 
-## Deployment
+## 📦 Deployment
 
 ### Docker
 
@@ -195,7 +195,7 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 | `(*relocator).Relocate`                  | actor.relocation         | actor.operation=relocation (optional)                       |
 | `(*PID).handleReceivedError`             | (marks doReceive failed) | handled_successfully=false                                  |
 
-## How It Works
+## 🔄 How It Works
 
 1. **Attach** — The agent resolves the target PID, loads eBPF programs, and attaches uprobes to GoAkt runtime symbols.
 2. **Capture** — On function entry (e.g. `doReceive`), the eBPF program allocates a span slot, records start time, and generates trace/span IDs.
@@ -204,7 +204,7 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 
 For more detail, see [Architecture](docs/ARCHITECTURE.md).
 
-## Compatibility
+## ✅ Compatibility
 
 - **GoAkt** — v4.x (instrumented symbols match GoAkt v4).
 - **Linux** — Required; eBPF is a Linux kernel feature. Docker Desktop on macOS/Windows uses a Linux VM that typically does not support eBPF; you may see `operation not permitted` when attaching to the target process.

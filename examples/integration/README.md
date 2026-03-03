@@ -4,12 +4,12 @@
 
 End-to-end example for goakt-ebpf using Docker Compose. Run this locally to verify the agent works with a GoAkt application.
 
-## Prerequisites
+## 📋 Prerequisites
 
 - Docker and Docker Compose
 - **Linux host** — eBPF requires a Linux kernel. Docker Desktop on macOS/Windows uses a Linux VM that typically does not support eBPF; you may see `operation not permitted` when attaching to the target process.
 
-## Running on Mac with Lima
+## 🔧 Running on Mac with Lima
 
 [Lima](https://github.com/lima-vm/lima) runs a real Linux VM with eBPF support. Use it instead of Docker Desktop to run this example on macOS.
 
@@ -90,20 +90,20 @@ Start it again later with `limactl start docker`.
 
 ---
 
-## Other options (Mac or Windows)
+## 🔗 Other options (Mac or Windows)
 
 eBPF is a Linux kernel feature. Docker Desktop's VM (linuxkit on Mac, WSL2 on Windows) usually lacks eBPF support or has permission restrictions.
 
 | Option                   | Mac                                                                    | Windows                                                                                                                                   |
 |--------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| **Colima**               | ⚠️ Same limitation as Lima vz on Apple Silicon — eBPF attach fails. | —                                                                                                                                         |
+| **Colima**               | ⚠️ Same limitation as Lima vz on Apple Silicon — eBPF attach fails.    | —                                                                                                                                         |
 | **Linux VM**             | ✅ Multipass, VMware, Parallels, or UTM — run Ubuntu and Docker inside. | ✅ Multipass, VMware, or Hyper-V — run Ubuntu and Docker inside.                                                                           |
 | **WSL2 (custom kernel)** | —                                                                      | ⚠️ Possible but complex: recompile the WSL2 kernel with eBPF flags. See [WSL eBPF guides](https://github.com/microsoft/WSL/issues/13047). |
 | **Remote Linux**         | ✅ Use a cloud VM (AWS, GCP, etc.), GitHub Codespaces, or a CI runner.  | ✅ Same.                                                                                                                                   |
 
 ---
 
-## Quick Start (Linux or Lima)
+## 🚀 Quick Start (Linux or Lima)
 
 From the repository root, use the Makefile:
 
@@ -126,7 +126,7 @@ docker compose -f examples/integration/docker-compose.yml up --build
 | **otel-collector** | Receives OTLP traces, forwards to Jaeger    | 4317, 4318 |
 | **jaeger**         | Trace visualization                         | 16686 (UI) |
 
-## View Traces
+## 🎯 View Traces
 
 1. Open http://localhost:16686 (Jaeger UI)
 2. Select service `goakt-ebpf`
@@ -163,17 +163,17 @@ The app sends Tell and Ask messages every 5 seconds (so the agent, which attache
 
 The agent runs in the same PID namespace as the app (`pid: "container:goakt-app"`) so it can attach uprobes.
 
-## Troubleshooting
+## 🔍 Troubleshooting
 
-| Error                                    | Cause                                                     | Fix                                                                                                   |
-|------------------------------------------|-----------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| No services in Jaeger                   | Docker using Docker Desktop (not Lima)                  | Run `make diagnose`. If DOCKER_HOST is unset, set it (step 3 above). Quit Docker Desktop. Then `make down && make build && make start`. |
-| `operation not permitted` (Lima vz)     | Lima's vz driver restricts eBPF on Apple Silicon        | Create a Lima instance with QEMU: `limactl start --name=ebpf --vm-type=qemu template:docker`, then set `DOCKER_HOST` to the `ebpf` instance. |
-| No services in Jaeger                   | Agent failed to attach (eBPF)                            | Run `make diagnose` and look for `operation not permitted` in agent logs. Try Lima with QEMU (see above) or a Linux host. |
-| No services in Jaeger                   | Agent attached but no traces yet                         | Wait 10–15 seconds. Select service `goakt-ebpf` in Jaeger dropdown, then click **Find Traces**. Run `make logs` to confirm agent is running. |
-| `invalid PID 1: operation not permitted` | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Use Lima/Colima (Mac), a Linux VM, or a remote Linux host                                             |
-| `operation not permitted` when attaching | Insufficient capabilities                                 | The compose file uses `privileged: true`; ensure Docker has permission                                |
-| `limactl list docker` returns nothing    | Instance may have a different name                        | Run `limactl list` to see instances; use that name in `limactl list <name>` and `limactl stop <name>` |
+| Error                                    | Cause                                                     | Fix                                                                                                                                          |
+|------------------------------------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| No services in Jaeger                    | Docker using Docker Desktop (not Lima)                    | Run `make diagnose`. If DOCKER_HOST is unset, set it (step 3 above). Quit Docker Desktop. Then `make down && make build && make start`.      |
+| `operation not permitted` (Lima vz)      | Lima's vz driver restricts eBPF on Apple Silicon          | Create a Lima instance with QEMU: `limactl start --name=ebpf --vm-type=qemu template:docker`, then set `DOCKER_HOST` to the `ebpf` instance. |
+| No services in Jaeger                    | Agent failed to attach (eBPF)                             | Run `make diagnose` and look for `operation not permitted` in agent logs. Try Lima with QEMU (see above) or a Linux host.                    |
+| No services in Jaeger                    | Agent attached but no traces yet                          | Wait 10–15 seconds. Select service `goakt-ebpf` in Jaeger dropdown, then click **Find Traces**. Run `make logs` to confirm agent is running. |
+| `invalid PID 1: operation not permitted` | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Use Lima/Colima (Mac), a Linux VM, or a remote Linux host                                                                                    |
+| `operation not permitted` when attaching | Insufficient capabilities                                 | The compose file uses `privileged: true`; ensure Docker has permission                                                                       |
+| `limactl list docker` returns nothing    | Instance may have a different name                        | Run `limactl list` to see instances; use that name in `limactl list <name>` and `limactl stop <name>`                                        |
 
 ## Cleanup
 

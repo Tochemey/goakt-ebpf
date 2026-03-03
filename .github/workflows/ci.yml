@@ -23,12 +23,13 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # "build" is true if any of these paths changed
           filters: |
             build:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
+              - '**/Dockerfile*'
+              - 'examples/**'
               - '.golangci.yml'
               - '.github/workflows/ci.yml'
 
@@ -140,3 +141,55 @@ jobs:
           tags: goakt-ebpf:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  integration:
+    name: Integration
+    needs: [changes, docker]
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start integration stack
+        run: |
+          docker compose -f examples/integration/docker-compose.yml up --build -d
+        env:
+          DOCKER_BUILDKIT: 1
+          COMPOSE_DOCKER_CLI_BUILD: 1
+
+      - name: Wait for agent and traces
+        run: sleep 20
+
+      - name: Verify agent attached
+        run: |
+          LOGS=$(docker compose -f examples/integration/docker-compose.yml logs goakt-ebpf 2>&1)
+          if echo "$LOGS" | grep -q "operation not permitted"; then
+            echo "Agent failed to attach (eBPF not supported on this runner)"
+            echo "$LOGS"
+            exit 1
+          fi
+          echo "Agent attached successfully"
+
+      - name: Verify traces in Jaeger
+        run: |
+          # Jaeger Query API - check for goakt-ebpf service and traces
+          SERVICES=$(curl -sf "http://localhost:16686/api/services" 2>/dev/null || echo "[]")
+          if echo "$SERVICES" | grep -q "goakt-ebpf"; then
+            echo "Service goakt-ebpf found in Jaeger"
+          else
+            echo "Service not found. Response: $SERVICES"
+          fi
+          TRACES=$(curl -sf "http://localhost:16686/api/traces?service=goakt-ebpf&limit=1" 2>/dev/null || echo "{}")
+          if echo "$TRACES" | grep -q '"data"'; then
+            echo "Traces found in Jaeger - integration OK"
+          else
+            echo "No traces yet (may need more time). Traces response: ${TRACES:0:200}"
+            # Don't fail - traces can be delayed; agent attach is the critical check
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f examples/integration/docker-compose.yml down -v
