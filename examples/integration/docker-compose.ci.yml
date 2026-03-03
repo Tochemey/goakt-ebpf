@@ -1,0 +1,13 @@
+# CI override: extra mounts and options for eBPF on GitHub Actions.
+# See https://keploy.io/blog/community/executing-ebpf-in-github-actions and
+# https://github.com/dorkamotorka/ebpf-github-actions
+# Merge with: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
+
+services:
+  goakt-ebpf:
+    volumes:
+      - /sys:/sys:ro
+      - /proc:/proc
+      - /boot:/boot:ro
+    security_opt:
+      - seccomp=unconfined
