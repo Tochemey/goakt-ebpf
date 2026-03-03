@@ -82,60 +82,117 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
-	UprobeRelocate                       *ebpf.ProgramSpec `ebpf:"uprobe_Relocate"`
-	UprobeRelocateReturns                *ebpf.ProgramSpec `ebpf:"uprobe_Relocate_Returns"`
-	UprobeSpawn                          *ebpf.ProgramSpec `ebpf:"uprobe_Spawn"`
-	UprobeSpawnChild                     *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild"`
-	UprobeSpawnChildReturns              *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild_Returns"`
-	UprobeSpawnReturns                   *ebpf.ProgramSpec `ebpf:"uprobe_Spawn_Returns"`
-	UprobeDoReceive                      *ebpf.ProgramSpec `ebpf:"uprobe_doReceive"`
-	UprobeDoReceiveReturns               *ebpf.ProgramSpec `ebpf:"uprobe_doReceive_Returns"`
-	UprobeGrainPID_process               *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process"`
-	UprobeGrainPID_processReturns        *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process_Returns"`
-	UprobeHandleGrainContext             *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext"`
-	UprobeHandleGrainContextReturns      *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext_Returns"`
-	UprobeHandleReceivedError            *ebpf.ProgramSpec `ebpf:"uprobe_handleReceivedError"`
-	UprobeHandleRemoteAsk                *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk"`
-	UprobeHandleRemoteAskReturns         *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk_Returns"`
-	UprobeHandleRemoteTell               *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell"`
-	UprobeHandleRemoteTellReturns        *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell_Returns"`
-	UprobeProcess                        *ebpf.ProgramSpec `ebpf:"uprobe_process"`
-	UprobeProcessReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_process_Returns"`
-	UprobeRemoteAskHandler               *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskHandler"`
-	UprobeRemoteAskHandlerReturns        *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskHandler_Returns"`
-	UprobeRemoteSpawnChildHandler        *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnChildHandler"`
-	UprobeRemoteSpawnChildHandlerReturns *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnChildHandler_Returns"`
-	UprobeRemoteSpawnHandler             *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnHandler"`
-	UprobeRemoteSpawnHandlerReturns      *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnHandler_Returns"`
-	UprobeRemoteTellHandler              *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellHandler"`
-	UprobeRemoteTellHandlerReturns       *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellHandler_Returns"`
+	UprobeRelocate                                *ebpf.ProgramSpec `ebpf:"uprobe_Relocate"`
+	UprobeRelocateReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_Relocate_Returns"`
+	UprobeSpawn                                   *ebpf.ProgramSpec `ebpf:"uprobe_Spawn"`
+	UprobeSpawnChild                              *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild"`
+	UprobeSpawnChildReturns                       *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild_Returns"`
+	UprobeSpawnOn                                 *ebpf.ProgramSpec `ebpf:"uprobe_SpawnOn"`
+	UprobeSpawnOnReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_SpawnOn_Returns"`
+	UprobeSpawnReturns                            *ebpf.ProgramSpec `ebpf:"uprobe_Spawn_Returns"`
+	UprobeDoReceive                               *ebpf.ProgramSpec `ebpf:"uprobe_doReceive"`
+	UprobeDoReceiveReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_doReceive_Returns"`
+	UprobeGrainPID_process                        *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process"`
+	UprobeGrainPID_processReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process_Returns"`
+	UprobeHandleGrainContext                      *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext"`
+	UprobeHandleGrainContextReturns               *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext_Returns"`
+	UprobeHandleReceivedError                     *ebpf.ProgramSpec `ebpf:"uprobe_handleReceivedError"`
+	UprobeHandleRemoteAsk                         *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk"`
+	UprobeHandleRemoteAskReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk_Returns"`
+	UprobeHandleRemoteTell                        *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell"`
+	UprobeHandleRemoteTellReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell_Returns"`
+	UprobeProcess                                 *ebpf.ProgramSpec `ebpf:"uprobe_process"`
+	UprobeProcessReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_process_Returns"`
+	UprobeRemoteActivateGrainHandler              *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler"`
+	UprobeRemoteActivateGrainHandlerReturns       *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
+	UprobeRemoteAskGrain                          *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrain"`
+	UprobeRemoteAskGrainHandler                   *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrainHandler"`
+	UprobeRemoteAskGrainHandlerReturns            *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrainHandler_Returns"`
+	UprobeRemoteAskGrainReturns                   *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrain_Returns"`
+	UprobeRemoteAskHandler                        *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskHandler"`
+	UprobeRemoteAskHandlerReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskHandler_Returns"`
+	UprobeRemoteChildrenHandler                   *ebpf.ProgramSpec `ebpf:"uprobe_remoteChildrenHandler"`
+	UprobeRemoteChildrenHandlerReturns            *ebpf.ProgramSpec `ebpf:"uprobe_remoteChildrenHandler_Returns"`
+	UprobeRemoteDependenciesHandler               *ebpf.ProgramSpec `ebpf:"uprobe_remoteDependenciesHandler"`
+	UprobeRemoteDependenciesHandlerReturns        *ebpf.ProgramSpec `ebpf:"uprobe_remoteDependenciesHandler_Returns"`
+	UprobeRemoteKindHandler                       *ebpf.ProgramSpec `ebpf:"uprobe_remoteKindHandler"`
+	UprobeRemoteKindHandlerReturns                *ebpf.ProgramSpec `ebpf:"uprobe_remoteKindHandler_Returns"`
+	UprobeRemoteLookupHandler                     *ebpf.ProgramSpec `ebpf:"uprobe_remoteLookupHandler"`
+	UprobeRemoteLookupHandlerReturns              *ebpf.ProgramSpec `ebpf:"uprobe_remoteLookupHandler_Returns"`
+	UprobeRemoteMetricHandler                     *ebpf.ProgramSpec `ebpf:"uprobe_remoteMetricHandler"`
+	UprobeRemoteMetricHandlerReturns              *ebpf.ProgramSpec `ebpf:"uprobe_remoteMetricHandler_Returns"`
+	UprobeRemoteParentHandler                     *ebpf.ProgramSpec `ebpf:"uprobe_remoteParentHandler"`
+	UprobeRemoteParentHandlerReturns              *ebpf.ProgramSpec `ebpf:"uprobe_remoteParentHandler_Returns"`
+	UprobeRemotePassivationStrategyHandler        *ebpf.ProgramSpec `ebpf:"uprobe_remotePassivationStrategyHandler"`
+	UprobeRemotePassivationStrategyHandlerReturns *ebpf.ProgramSpec `ebpf:"uprobe_remotePassivationStrategyHandler_Returns"`
+	UprobeRemoteReSpawnHandler                    *ebpf.ProgramSpec `ebpf:"uprobe_remoteReSpawnHandler"`
+	UprobeRemoteReSpawnHandlerReturns             *ebpf.ProgramSpec `ebpf:"uprobe_remoteReSpawnHandler_Returns"`
+	UprobeRemoteReinstateHandler                  *ebpf.ProgramSpec `ebpf:"uprobe_remoteReinstateHandler"`
+	UprobeRemoteReinstateHandlerReturns           *ebpf.ProgramSpec `ebpf:"uprobe_remoteReinstateHandler_Returns"`
+	UprobeRemoteRoleHandler                       *ebpf.ProgramSpec `ebpf:"uprobe_remoteRoleHandler"`
+	UprobeRemoteRoleHandlerReturns                *ebpf.ProgramSpec `ebpf:"uprobe_remoteRoleHandler_Returns"`
+	UprobeRemoteSpawnChildHandler                 *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnChildHandler"`
+	UprobeRemoteSpawnChildHandlerReturns          *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnChildHandler_Returns"`
+	UprobeRemoteSpawnHandler                      *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnHandler"`
+	UprobeRemoteSpawnHandlerReturns               *ebpf.ProgramSpec `ebpf:"uprobe_remoteSpawnHandler_Returns"`
+	UprobeRemoteStashSizeHandler                  *ebpf.ProgramSpec `ebpf:"uprobe_remoteStashSizeHandler"`
+	UprobeRemoteStashSizeHandlerReturns           *ebpf.ProgramSpec `ebpf:"uprobe_remoteStashSizeHandler_Returns"`
+	UprobeRemoteStateHandler                      *ebpf.ProgramSpec `ebpf:"uprobe_remoteStateHandler"`
+	UprobeRemoteStateHandlerReturns               *ebpf.ProgramSpec `ebpf:"uprobe_remoteStateHandler_Returns"`
+	UprobeRemoteStopHandler                       *ebpf.ProgramSpec `ebpf:"uprobe_remoteStopHandler"`
+	UprobeRemoteStopHandlerReturns                *ebpf.ProgramSpec `ebpf:"uprobe_remoteStopHandler_Returns"`
+	UprobeRemoteTellGrain                         *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellGrain"`
+	UprobeRemoteTellGrainHandler                  *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellGrainHandler"`
+	UprobeRemoteTellGrainHandlerReturns           *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellGrainHandler_Returns"`
+	UprobeRemoteTellGrainReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellGrain_Returns"`
+	UprobeRemoteTellHandler                       *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellHandler"`
+	UprobeRemoteTellHandlerReturns                *ebpf.ProgramSpec `ebpf:"uprobe_remoteTellHandler_Returns"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	AllocMap                    *ebpf.MapSpec `ebpf:"alloc_map"`
-	Events                      *ebpf.MapSpec `ebpf:"events"`
-	GoContextToSc               *ebpf.MapSpec `ebpf:"go_context_to_sc"`
-	GoaktActorDoReceive         *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
-	GoaktActorGrainDoReceive    *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
-	GoaktActorGrainProcess      *ebpf.MapSpec `ebpf:"goakt_actor_grain_process"`
-	GoaktActorProcess           *ebpf.MapSpec `ebpf:"goakt_actor_process"`
-	GoaktActorRelocation        *ebpf.MapSpec `ebpf:"goakt_actor_relocation"`
-	GoaktActorRemoteAsk         *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask"`
-	GoaktActorRemoteAskReceive  *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask_receive"`
-	GoaktActorRemoteSpawn       *ebpf.MapSpec `ebpf:"goakt_actor_remote_spawn"`
-	GoaktActorRemoteSpawnChild  *ebpf.MapSpec `ebpf:"goakt_actor_remote_spawn_child"`
-	GoaktActorRemoteTell        *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell"`
-	GoaktActorRemoteTellReceive *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_receive"`
-	GoaktActorSpawnChild        *ebpf.MapSpec `ebpf:"goakt_actor_spawn_child"`
-	GoaktActorSystemSpawn       *ebpf.MapSpec `ebpf:"goakt_actor_system_spawn"`
-	GoaktActorUprobeStorageMap  *ebpf.MapSpec `ebpf:"goakt_actor_uprobe_storage_map"`
-	ProbeActiveSamplerMap       *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap           *ebpf.MapSpec `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap           *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
-	TrackedSpansBySc            *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
+	AllocMap                            *ebpf.MapSpec `ebpf:"alloc_map"`
+	Events                              *ebpf.MapSpec `ebpf:"events"`
+	GoContextToSc                       *ebpf.MapSpec `ebpf:"go_context_to_sc"`
+	GoaktActorDoReceive                 *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
+	GoaktActorGrainDoReceive            *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
+	GoaktActorGrainProcess              *ebpf.MapSpec `ebpf:"goakt_actor_grain_process"`
+	GoaktActorProcess                   *ebpf.MapSpec `ebpf:"goakt_actor_process"`
+	GoaktActorRelocation                *ebpf.MapSpec `ebpf:"goakt_actor_relocation"`
+	GoaktActorRemoteActivateGrain       *ebpf.MapSpec `ebpf:"goakt_actor_remote_activate_grain"`
+	GoaktActorRemoteAsk                 *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask"`
+	GoaktActorRemoteAskGrain            *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask_grain"`
+	GoaktActorRemoteAskGrainReceive     *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask_grain_receive"`
+	GoaktActorRemoteAskReceive          *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask_receive"`
+	GoaktActorRemoteChildren            *ebpf.MapSpec `ebpf:"goakt_actor_remote_children"`
+	GoaktActorRemoteDependencies        *ebpf.MapSpec `ebpf:"goakt_actor_remote_dependencies"`
+	GoaktActorRemoteKind                *ebpf.MapSpec `ebpf:"goakt_actor_remote_kind"`
+	GoaktActorRemoteLookup              *ebpf.MapSpec `ebpf:"goakt_actor_remote_lookup"`
+	GoaktActorRemoteMetric              *ebpf.MapSpec `ebpf:"goakt_actor_remote_metric"`
+	GoaktActorRemoteParent              *ebpf.MapSpec `ebpf:"goakt_actor_remote_parent"`
+	GoaktActorRemotePassivationStrategy *ebpf.MapSpec `ebpf:"goakt_actor_remote_passivation_strategy"`
+	GoaktActorRemoteReSpawn             *ebpf.MapSpec `ebpf:"goakt_actor_remote_re_spawn"`
+	GoaktActorRemoteReinstate           *ebpf.MapSpec `ebpf:"goakt_actor_remote_reinstate"`
+	GoaktActorRemoteRole                *ebpf.MapSpec `ebpf:"goakt_actor_remote_role"`
+	GoaktActorRemoteSpawn               *ebpf.MapSpec `ebpf:"goakt_actor_remote_spawn"`
+	GoaktActorRemoteSpawnChild          *ebpf.MapSpec `ebpf:"goakt_actor_remote_spawn_child"`
+	GoaktActorRemoteStashSize           *ebpf.MapSpec `ebpf:"goakt_actor_remote_stash_size"`
+	GoaktActorRemoteState               *ebpf.MapSpec `ebpf:"goakt_actor_remote_state"`
+	GoaktActorRemoteStop                *ebpf.MapSpec `ebpf:"goakt_actor_remote_stop"`
+	GoaktActorRemoteTell                *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell"`
+	GoaktActorRemoteTellGrain           *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_grain"`
+	GoaktActorRemoteTellGrainReceive    *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_grain_receive"`
+	GoaktActorRemoteTellReceive         *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_receive"`
+	GoaktActorSpawnChild                *ebpf.MapSpec `ebpf:"goakt_actor_spawn_child"`
+	GoaktActorSpawnOn                   *ebpf.MapSpec `ebpf:"goakt_actor_spawn_on"`
+	GoaktActorSystemSpawn               *ebpf.MapSpec `ebpf:"goakt_actor_system_spawn"`
+	GoaktActorUprobeStorageMap          *ebpf.MapSpec `ebpf:"goakt_actor_uprobe_storage_map"`
+	ProbeActiveSamplerMap               *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap                   *ebpf.MapSpec `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap                   *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
+	TrackedSpansBySc                    *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
 }
 
 // bpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -168,27 +225,46 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	AllocMap                    *ebpf.Map `ebpf:"alloc_map"`
-	Events                      *ebpf.Map `ebpf:"events"`
-	GoContextToSc               *ebpf.Map `ebpf:"go_context_to_sc"`
-	GoaktActorDoReceive         *ebpf.Map `ebpf:"goakt_actor_do_receive"`
-	GoaktActorGrainDoReceive    *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
-	GoaktActorGrainProcess      *ebpf.Map `ebpf:"goakt_actor_grain_process"`
-	GoaktActorProcess           *ebpf.Map `ebpf:"goakt_actor_process"`
-	GoaktActorRelocation        *ebpf.Map `ebpf:"goakt_actor_relocation"`
-	GoaktActorRemoteAsk         *ebpf.Map `ebpf:"goakt_actor_remote_ask"`
-	GoaktActorRemoteAskReceive  *ebpf.Map `ebpf:"goakt_actor_remote_ask_receive"`
-	GoaktActorRemoteSpawn       *ebpf.Map `ebpf:"goakt_actor_remote_spawn"`
-	GoaktActorRemoteSpawnChild  *ebpf.Map `ebpf:"goakt_actor_remote_spawn_child"`
-	GoaktActorRemoteTell        *ebpf.Map `ebpf:"goakt_actor_remote_tell"`
-	GoaktActorRemoteTellReceive *ebpf.Map `ebpf:"goakt_actor_remote_tell_receive"`
-	GoaktActorSpawnChild        *ebpf.Map `ebpf:"goakt_actor_spawn_child"`
-	GoaktActorSystemSpawn       *ebpf.Map `ebpf:"goakt_actor_system_spawn"`
-	GoaktActorUprobeStorageMap  *ebpf.Map `ebpf:"goakt_actor_uprobe_storage_map"`
-	ProbeActiveSamplerMap       *ebpf.Map `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap           *ebpf.Map `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap           *ebpf.Map `ebpf:"slice_array_buff_map"`
-	TrackedSpansBySc            *ebpf.Map `ebpf:"tracked_spans_by_sc"`
+	AllocMap                            *ebpf.Map `ebpf:"alloc_map"`
+	Events                              *ebpf.Map `ebpf:"events"`
+	GoContextToSc                       *ebpf.Map `ebpf:"go_context_to_sc"`
+	GoaktActorDoReceive                 *ebpf.Map `ebpf:"goakt_actor_do_receive"`
+	GoaktActorGrainDoReceive            *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
+	GoaktActorGrainProcess              *ebpf.Map `ebpf:"goakt_actor_grain_process"`
+	GoaktActorProcess                   *ebpf.Map `ebpf:"goakt_actor_process"`
+	GoaktActorRelocation                *ebpf.Map `ebpf:"goakt_actor_relocation"`
+	GoaktActorRemoteActivateGrain       *ebpf.Map `ebpf:"goakt_actor_remote_activate_grain"`
+	GoaktActorRemoteAsk                 *ebpf.Map `ebpf:"goakt_actor_remote_ask"`
+	GoaktActorRemoteAskGrain            *ebpf.Map `ebpf:"goakt_actor_remote_ask_grain"`
+	GoaktActorRemoteAskGrainReceive     *ebpf.Map `ebpf:"goakt_actor_remote_ask_grain_receive"`
+	GoaktActorRemoteAskReceive          *ebpf.Map `ebpf:"goakt_actor_remote_ask_receive"`
+	GoaktActorRemoteChildren            *ebpf.Map `ebpf:"goakt_actor_remote_children"`
+	GoaktActorRemoteDependencies        *ebpf.Map `ebpf:"goakt_actor_remote_dependencies"`
+	GoaktActorRemoteKind                *ebpf.Map `ebpf:"goakt_actor_remote_kind"`
+	GoaktActorRemoteLookup              *ebpf.Map `ebpf:"goakt_actor_remote_lookup"`
+	GoaktActorRemoteMetric              *ebpf.Map `ebpf:"goakt_actor_remote_metric"`
+	GoaktActorRemoteParent              *ebpf.Map `ebpf:"goakt_actor_remote_parent"`
+	GoaktActorRemotePassivationStrategy *ebpf.Map `ebpf:"goakt_actor_remote_passivation_strategy"`
+	GoaktActorRemoteReSpawn             *ebpf.Map `ebpf:"goakt_actor_remote_re_spawn"`
+	GoaktActorRemoteReinstate           *ebpf.Map `ebpf:"goakt_actor_remote_reinstate"`
+	GoaktActorRemoteRole                *ebpf.Map `ebpf:"goakt_actor_remote_role"`
+	GoaktActorRemoteSpawn               *ebpf.Map `ebpf:"goakt_actor_remote_spawn"`
+	GoaktActorRemoteSpawnChild          *ebpf.Map `ebpf:"goakt_actor_remote_spawn_child"`
+	GoaktActorRemoteStashSize           *ebpf.Map `ebpf:"goakt_actor_remote_stash_size"`
+	GoaktActorRemoteState               *ebpf.Map `ebpf:"goakt_actor_remote_state"`
+	GoaktActorRemoteStop                *ebpf.Map `ebpf:"goakt_actor_remote_stop"`
+	GoaktActorRemoteTell                *ebpf.Map `ebpf:"goakt_actor_remote_tell"`
+	GoaktActorRemoteTellGrain           *ebpf.Map `ebpf:"goakt_actor_remote_tell_grain"`
+	GoaktActorRemoteTellGrainReceive    *ebpf.Map `ebpf:"goakt_actor_remote_tell_grain_receive"`
+	GoaktActorRemoteTellReceive         *ebpf.Map `ebpf:"goakt_actor_remote_tell_receive"`
+	GoaktActorSpawnChild                *ebpf.Map `ebpf:"goakt_actor_spawn_child"`
+	GoaktActorSpawnOn                   *ebpf.Map `ebpf:"goakt_actor_spawn_on"`
+	GoaktActorSystemSpawn               *ebpf.Map `ebpf:"goakt_actor_system_spawn"`
+	GoaktActorUprobeStorageMap          *ebpf.Map `ebpf:"goakt_actor_uprobe_storage_map"`
+	ProbeActiveSamplerMap               *ebpf.Map `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap                   *ebpf.Map `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap                   *ebpf.Map `ebpf:"slice_array_buff_map"`
+	TrackedSpansBySc                    *ebpf.Map `ebpf:"tracked_spans_by_sc"`
 }
 
 func (m *bpfMaps) Close() error {
@@ -201,13 +277,32 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorGrainProcess,
 		m.GoaktActorProcess,
 		m.GoaktActorRelocation,
+		m.GoaktActorRemoteActivateGrain,
 		m.GoaktActorRemoteAsk,
+		m.GoaktActorRemoteAskGrain,
+		m.GoaktActorRemoteAskGrainReceive,
 		m.GoaktActorRemoteAskReceive,
+		m.GoaktActorRemoteChildren,
+		m.GoaktActorRemoteDependencies,
+		m.GoaktActorRemoteKind,
+		m.GoaktActorRemoteLookup,
+		m.GoaktActorRemoteMetric,
+		m.GoaktActorRemoteParent,
+		m.GoaktActorRemotePassivationStrategy,
+		m.GoaktActorRemoteReSpawn,
+		m.GoaktActorRemoteReinstate,
+		m.GoaktActorRemoteRole,
 		m.GoaktActorRemoteSpawn,
 		m.GoaktActorRemoteSpawnChild,
+		m.GoaktActorRemoteStashSize,
+		m.GoaktActorRemoteState,
+		m.GoaktActorRemoteStop,
 		m.GoaktActorRemoteTell,
+		m.GoaktActorRemoteTellGrain,
+		m.GoaktActorRemoteTellGrainReceive,
 		m.GoaktActorRemoteTellReceive,
 		m.GoaktActorSpawnChild,
+		m.GoaktActorSpawnOn,
 		m.GoaktActorSystemSpawn,
 		m.GoaktActorUprobeStorageMap,
 		m.ProbeActiveSamplerMap,
@@ -231,33 +326,71 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
-	UprobeRelocate                       *ebpf.Program `ebpf:"uprobe_Relocate"`
-	UprobeRelocateReturns                *ebpf.Program `ebpf:"uprobe_Relocate_Returns"`
-	UprobeSpawn                          *ebpf.Program `ebpf:"uprobe_Spawn"`
-	UprobeSpawnChild                     *ebpf.Program `ebpf:"uprobe_SpawnChild"`
-	UprobeSpawnChildReturns              *ebpf.Program `ebpf:"uprobe_SpawnChild_Returns"`
-	UprobeSpawnReturns                   *ebpf.Program `ebpf:"uprobe_Spawn_Returns"`
-	UprobeDoReceive                      *ebpf.Program `ebpf:"uprobe_doReceive"`
-	UprobeDoReceiveReturns               *ebpf.Program `ebpf:"uprobe_doReceive_Returns"`
-	UprobeGrainPID_process               *ebpf.Program `ebpf:"uprobe_grainPID_process"`
-	UprobeGrainPID_processReturns        *ebpf.Program `ebpf:"uprobe_grainPID_process_Returns"`
-	UprobeHandleGrainContext             *ebpf.Program `ebpf:"uprobe_handleGrainContext"`
-	UprobeHandleGrainContextReturns      *ebpf.Program `ebpf:"uprobe_handleGrainContext_Returns"`
-	UprobeHandleReceivedError            *ebpf.Program `ebpf:"uprobe_handleReceivedError"`
-	UprobeHandleRemoteAsk                *ebpf.Program `ebpf:"uprobe_handleRemoteAsk"`
-	UprobeHandleRemoteAskReturns         *ebpf.Program `ebpf:"uprobe_handleRemoteAsk_Returns"`
-	UprobeHandleRemoteTell               *ebpf.Program `ebpf:"uprobe_handleRemoteTell"`
-	UprobeHandleRemoteTellReturns        *ebpf.Program `ebpf:"uprobe_handleRemoteTell_Returns"`
-	UprobeProcess                        *ebpf.Program `ebpf:"uprobe_process"`
-	UprobeProcessReturns                 *ebpf.Program `ebpf:"uprobe_process_Returns"`
-	UprobeRemoteAskHandler               *ebpf.Program `ebpf:"uprobe_remoteAskHandler"`
-	UprobeRemoteAskHandlerReturns        *ebpf.Program `ebpf:"uprobe_remoteAskHandler_Returns"`
-	UprobeRemoteSpawnChildHandler        *ebpf.Program `ebpf:"uprobe_remoteSpawnChildHandler"`
-	UprobeRemoteSpawnChildHandlerReturns *ebpf.Program `ebpf:"uprobe_remoteSpawnChildHandler_Returns"`
-	UprobeRemoteSpawnHandler             *ebpf.Program `ebpf:"uprobe_remoteSpawnHandler"`
-	UprobeRemoteSpawnHandlerReturns      *ebpf.Program `ebpf:"uprobe_remoteSpawnHandler_Returns"`
-	UprobeRemoteTellHandler              *ebpf.Program `ebpf:"uprobe_remoteTellHandler"`
-	UprobeRemoteTellHandlerReturns       *ebpf.Program `ebpf:"uprobe_remoteTellHandler_Returns"`
+	UprobeRelocate                                *ebpf.Program `ebpf:"uprobe_Relocate"`
+	UprobeRelocateReturns                         *ebpf.Program `ebpf:"uprobe_Relocate_Returns"`
+	UprobeSpawn                                   *ebpf.Program `ebpf:"uprobe_Spawn"`
+	UprobeSpawnChild                              *ebpf.Program `ebpf:"uprobe_SpawnChild"`
+	UprobeSpawnChildReturns                       *ebpf.Program `ebpf:"uprobe_SpawnChild_Returns"`
+	UprobeSpawnOn                                 *ebpf.Program `ebpf:"uprobe_SpawnOn"`
+	UprobeSpawnOnReturns                          *ebpf.Program `ebpf:"uprobe_SpawnOn_Returns"`
+	UprobeSpawnReturns                            *ebpf.Program `ebpf:"uprobe_Spawn_Returns"`
+	UprobeDoReceive                               *ebpf.Program `ebpf:"uprobe_doReceive"`
+	UprobeDoReceiveReturns                        *ebpf.Program `ebpf:"uprobe_doReceive_Returns"`
+	UprobeGrainPID_process                        *ebpf.Program `ebpf:"uprobe_grainPID_process"`
+	UprobeGrainPID_processReturns                 *ebpf.Program `ebpf:"uprobe_grainPID_process_Returns"`
+	UprobeHandleGrainContext                      *ebpf.Program `ebpf:"uprobe_handleGrainContext"`
+	UprobeHandleGrainContextReturns               *ebpf.Program `ebpf:"uprobe_handleGrainContext_Returns"`
+	UprobeHandleReceivedError                     *ebpf.Program `ebpf:"uprobe_handleReceivedError"`
+	UprobeHandleRemoteAsk                         *ebpf.Program `ebpf:"uprobe_handleRemoteAsk"`
+	UprobeHandleRemoteAskReturns                  *ebpf.Program `ebpf:"uprobe_handleRemoteAsk_Returns"`
+	UprobeHandleRemoteTell                        *ebpf.Program `ebpf:"uprobe_handleRemoteTell"`
+	UprobeHandleRemoteTellReturns                 *ebpf.Program `ebpf:"uprobe_handleRemoteTell_Returns"`
+	UprobeProcess                                 *ebpf.Program `ebpf:"uprobe_process"`
+	UprobeProcessReturns                          *ebpf.Program `ebpf:"uprobe_process_Returns"`
+	UprobeRemoteActivateGrainHandler              *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler"`
+	UprobeRemoteActivateGrainHandlerReturns       *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
+	UprobeRemoteAskGrain                          *ebpf.Program `ebpf:"uprobe_remoteAskGrain"`
+	UprobeRemoteAskGrainHandler                   *ebpf.Program `ebpf:"uprobe_remoteAskGrainHandler"`
+	UprobeRemoteAskGrainHandlerReturns            *ebpf.Program `ebpf:"uprobe_remoteAskGrainHandler_Returns"`
+	UprobeRemoteAskGrainReturns                   *ebpf.Program `ebpf:"uprobe_remoteAskGrain_Returns"`
+	UprobeRemoteAskHandler                        *ebpf.Program `ebpf:"uprobe_remoteAskHandler"`
+	UprobeRemoteAskHandlerReturns                 *ebpf.Program `ebpf:"uprobe_remoteAskHandler_Returns"`
+	UprobeRemoteChildrenHandler                   *ebpf.Program `ebpf:"uprobe_remoteChildrenHandler"`
+	UprobeRemoteChildrenHandlerReturns            *ebpf.Program `ebpf:"uprobe_remoteChildrenHandler_Returns"`
+	UprobeRemoteDependenciesHandler               *ebpf.Program `ebpf:"uprobe_remoteDependenciesHandler"`
+	UprobeRemoteDependenciesHandlerReturns        *ebpf.Program `ebpf:"uprobe_remoteDependenciesHandler_Returns"`
+	UprobeRemoteKindHandler                       *ebpf.Program `ebpf:"uprobe_remoteKindHandler"`
+	UprobeRemoteKindHandlerReturns                *ebpf.Program `ebpf:"uprobe_remoteKindHandler_Returns"`
+	UprobeRemoteLookupHandler                     *ebpf.Program `ebpf:"uprobe_remoteLookupHandler"`
+	UprobeRemoteLookupHandlerReturns              *ebpf.Program `ebpf:"uprobe_remoteLookupHandler_Returns"`
+	UprobeRemoteMetricHandler                     *ebpf.Program `ebpf:"uprobe_remoteMetricHandler"`
+	UprobeRemoteMetricHandlerReturns              *ebpf.Program `ebpf:"uprobe_remoteMetricHandler_Returns"`
+	UprobeRemoteParentHandler                     *ebpf.Program `ebpf:"uprobe_remoteParentHandler"`
+	UprobeRemoteParentHandlerReturns              *ebpf.Program `ebpf:"uprobe_remoteParentHandler_Returns"`
+	UprobeRemotePassivationStrategyHandler        *ebpf.Program `ebpf:"uprobe_remotePassivationStrategyHandler"`
+	UprobeRemotePassivationStrategyHandlerReturns *ebpf.Program `ebpf:"uprobe_remotePassivationStrategyHandler_Returns"`
+	UprobeRemoteReSpawnHandler                    *ebpf.Program `ebpf:"uprobe_remoteReSpawnHandler"`
+	UprobeRemoteReSpawnHandlerReturns             *ebpf.Program `ebpf:"uprobe_remoteReSpawnHandler_Returns"`
+	UprobeRemoteReinstateHandler                  *ebpf.Program `ebpf:"uprobe_remoteReinstateHandler"`
+	UprobeRemoteReinstateHandlerReturns           *ebpf.Program `ebpf:"uprobe_remoteReinstateHandler_Returns"`
+	UprobeRemoteRoleHandler                       *ebpf.Program `ebpf:"uprobe_remoteRoleHandler"`
+	UprobeRemoteRoleHandlerReturns                *ebpf.Program `ebpf:"uprobe_remoteRoleHandler_Returns"`
+	UprobeRemoteSpawnChildHandler                 *ebpf.Program `ebpf:"uprobe_remoteSpawnChildHandler"`
+	UprobeRemoteSpawnChildHandlerReturns          *ebpf.Program `ebpf:"uprobe_remoteSpawnChildHandler_Returns"`
+	UprobeRemoteSpawnHandler                      *ebpf.Program `ebpf:"uprobe_remoteSpawnHandler"`
+	UprobeRemoteSpawnHandlerReturns               *ebpf.Program `ebpf:"uprobe_remoteSpawnHandler_Returns"`
+	UprobeRemoteStashSizeHandler                  *ebpf.Program `ebpf:"uprobe_remoteStashSizeHandler"`
+	UprobeRemoteStashSizeHandlerReturns           *ebpf.Program `ebpf:"uprobe_remoteStashSizeHandler_Returns"`
+	UprobeRemoteStateHandler                      *ebpf.Program `ebpf:"uprobe_remoteStateHandler"`
+	UprobeRemoteStateHandlerReturns               *ebpf.Program `ebpf:"uprobe_remoteStateHandler_Returns"`
+	UprobeRemoteStopHandler                       *ebpf.Program `ebpf:"uprobe_remoteStopHandler"`
+	UprobeRemoteStopHandlerReturns                *ebpf.Program `ebpf:"uprobe_remoteStopHandler_Returns"`
+	UprobeRemoteTellGrain                         *ebpf.Program `ebpf:"uprobe_remoteTellGrain"`
+	UprobeRemoteTellGrainHandler                  *ebpf.Program `ebpf:"uprobe_remoteTellGrainHandler"`
+	UprobeRemoteTellGrainHandlerReturns           *ebpf.Program `ebpf:"uprobe_remoteTellGrainHandler_Returns"`
+	UprobeRemoteTellGrainReturns                  *ebpf.Program `ebpf:"uprobe_remoteTellGrain_Returns"`
+	UprobeRemoteTellHandler                       *ebpf.Program `ebpf:"uprobe_remoteTellHandler"`
+	UprobeRemoteTellHandlerReturns                *ebpf.Program `ebpf:"uprobe_remoteTellHandler_Returns"`
 }
 
 func (p *bpfPrograms) Close() error {
@@ -267,6 +400,8 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeSpawn,
 		p.UprobeSpawnChild,
 		p.UprobeSpawnChildReturns,
+		p.UprobeSpawnOn,
+		p.UprobeSpawnOnReturns,
 		p.UprobeSpawnReturns,
 		p.UprobeDoReceive,
 		p.UprobeDoReceiveReturns,
@@ -281,12 +416,48 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeHandleRemoteTellReturns,
 		p.UprobeProcess,
 		p.UprobeProcessReturns,
+		p.UprobeRemoteActivateGrainHandler,
+		p.UprobeRemoteActivateGrainHandlerReturns,
+		p.UprobeRemoteAskGrain,
+		p.UprobeRemoteAskGrainHandler,
+		p.UprobeRemoteAskGrainHandlerReturns,
+		p.UprobeRemoteAskGrainReturns,
 		p.UprobeRemoteAskHandler,
 		p.UprobeRemoteAskHandlerReturns,
+		p.UprobeRemoteChildrenHandler,
+		p.UprobeRemoteChildrenHandlerReturns,
+		p.UprobeRemoteDependenciesHandler,
+		p.UprobeRemoteDependenciesHandlerReturns,
+		p.UprobeRemoteKindHandler,
+		p.UprobeRemoteKindHandlerReturns,
+		p.UprobeRemoteLookupHandler,
+		p.UprobeRemoteLookupHandlerReturns,
+		p.UprobeRemoteMetricHandler,
+		p.UprobeRemoteMetricHandlerReturns,
+		p.UprobeRemoteParentHandler,
+		p.UprobeRemoteParentHandlerReturns,
+		p.UprobeRemotePassivationStrategyHandler,
+		p.UprobeRemotePassivationStrategyHandlerReturns,
+		p.UprobeRemoteReSpawnHandler,
+		p.UprobeRemoteReSpawnHandlerReturns,
+		p.UprobeRemoteReinstateHandler,
+		p.UprobeRemoteReinstateHandlerReturns,
+		p.UprobeRemoteRoleHandler,
+		p.UprobeRemoteRoleHandlerReturns,
 		p.UprobeRemoteSpawnChildHandler,
 		p.UprobeRemoteSpawnChildHandlerReturns,
 		p.UprobeRemoteSpawnHandler,
 		p.UprobeRemoteSpawnHandlerReturns,
+		p.UprobeRemoteStashSizeHandler,
+		p.UprobeRemoteStashSizeHandlerReturns,
+		p.UprobeRemoteStateHandler,
+		p.UprobeRemoteStateHandlerReturns,
+		p.UprobeRemoteStopHandler,
+		p.UprobeRemoteStopHandlerReturns,
+		p.UprobeRemoteTellGrain,
+		p.UprobeRemoteTellGrainHandler,
+		p.UprobeRemoteTellGrainHandlerReturns,
+		p.UprobeRemoteTellGrainReturns,
 		p.UprobeRemoteTellHandler,
 		p.UprobeRemoteTellHandlerReturns,
 	)

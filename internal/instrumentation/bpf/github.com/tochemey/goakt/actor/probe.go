@@ -28,19 +28,38 @@ const pkg = "github.com/tochemey/goakt/v4/actor"
 
 // Event type constants (must match C EVENT_TYPE_*)
 const (
-	eventTypeDoReceive         = 1
-	eventTypeRemoteTell        = 2
-	eventTypeRemoteAsk         = 3
-	eventTypeProcess           = 4
-	eventTypeGrainProcess      = 5
-	eventTypeGrainDoReceive    = 6
-	eventTypeSystemSpawn       = 7
-	eventTypeSpawnChild        = 8
-	eventTypeRemoteSpawn       = 9
-	eventTypeRemoteSpawnChild  = 10
-	eventTypeRemoteTellReceive = 11
-	eventTypeRemoteAskReceive  = 12
-	eventTypeRelocation        = 13
+	eventTypeDoReceive                 = 1
+	eventTypeRemoteTell                = 2
+	eventTypeRemoteAsk                 = 3
+	eventTypeProcess                   = 4
+	eventTypeGrainProcess              = 5
+	eventTypeGrainDoReceive            = 6
+	eventTypeSystemSpawn               = 7
+	eventTypeSpawnChild                = 8
+	eventTypeRemoteSpawn               = 9
+	eventTypeRemoteSpawnChild          = 10
+	eventTypeRemoteTellReceive         = 11
+	eventTypeRemoteAskReceive          = 12
+	eventTypeRelocation                = 13
+	eventTypeRemoteTellGrain           = 14
+	eventTypeRemoteAskGrain            = 15
+	eventTypeRemoteLookup              = 16
+	eventTypeRemoteReSpawn             = 17
+	eventTypeRemoteStop                = 18
+	eventTypeRemoteAskGrainReceive     = 19
+	eventTypeRemoteTellGrainReceive    = 20
+	eventTypeRemoteActivateGrain       = 21
+	eventTypeRemoteReinstate           = 22
+	eventTypeRemotePassivationStrategy = 23
+	eventTypeRemoteState               = 24
+	eventTypeRemoteChildren            = 25
+	eventTypeRemoteParent              = 26
+	eventTypeRemoteKind                = 27
+	eventTypeRemoteDependencies        = 28
+	eventTypeRemoteMetric              = 29
+	eventTypeRemoteRole                = 30
+	eventTypeRemoteStashSize           = 31
+	eventTypeSpawnOn                   = 32
 )
 
 // New returns a new [probe.Probe] for GoAkt actor instrumentation (all targets).
@@ -91,6 +110,12 @@ func New(logger *slog.Logger, version string) probe.Probe {
 					ReturnProbe: "uprobe_Spawn_Returns",
 				},
 				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).SpawnOn",
+					EntryProbe:  "uprobe_SpawnOn",
+					ReturnProbe: "uprobe_SpawnOn_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).SpawnChild",
 					EntryProbe:  "uprobe_SpawnChild",
 					ReturnProbe: "uprobe_SpawnChild_Returns",
@@ -116,10 +141,109 @@ func New(logger *slog.Logger, version string) probe.Probe {
 					ReturnProbe: "uprobe_remoteAskHandler_Returns",
 				},
 				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteTellGrain",
+					EntryProbe:  "uprobe_remoteTellGrain",
+					ReturnProbe: "uprobe_remoteTellGrain_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteAskGrain",
+					EntryProbe:  "uprobe_remoteAskGrain",
+					ReturnProbe: "uprobe_remoteAskGrain_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteLookupHandler",
+					EntryProbe:  "uprobe_remoteLookupHandler",
+					ReturnProbe: "uprobe_remoteLookupHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteReSpawnHandler",
+					EntryProbe:  "uprobe_remoteReSpawnHandler",
+					ReturnProbe: "uprobe_remoteReSpawnHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteStopHandler",
+					EntryProbe:  "uprobe_remoteStopHandler",
+					ReturnProbe: "uprobe_remoteStopHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteAskGrainHandler",
+					EntryProbe:  "uprobe_remoteAskGrainHandler",
+					ReturnProbe: "uprobe_remoteAskGrainHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteTellGrainHandler",
+					EntryProbe:  "uprobe_remoteTellGrainHandler",
+					ReturnProbe: "uprobe_remoteTellGrainHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteActivateGrainHandler",
+					EntryProbe:  "uprobe_remoteActivateGrainHandler",
+					ReturnProbe: "uprobe_remoteActivateGrainHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteReinstateHandler",
+					EntryProbe:  "uprobe_remoteReinstateHandler",
+					ReturnProbe: "uprobe_remoteReinstateHandler_Returns",
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remotePassivationStrategyHandler",
+					EntryProbe:  "uprobe_remotePassivationStrategyHandler",
+					ReturnProbe: "uprobe_remotePassivationStrategyHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteStateHandler",
+					EntryProbe:  "uprobe_remoteStateHandler",
+					ReturnProbe: "uprobe_remoteStateHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteChildrenHandler",
+					EntryProbe:  "uprobe_remoteChildrenHandler",
+					ReturnProbe: "uprobe_remoteChildrenHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteParentHandler",
+					EntryProbe:  "uprobe_remoteParentHandler",
+					ReturnProbe: "uprobe_remoteParentHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteKindHandler",
+					EntryProbe:  "uprobe_remoteKindHandler",
+					ReturnProbe: "uprobe_remoteKindHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteDependenciesHandler",
+					EntryProbe:  "uprobe_remoteDependenciesHandler",
+					ReturnProbe: "uprobe_remoteDependenciesHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteMetricHandler",
+					EntryProbe:  "uprobe_remoteMetricHandler",
+					ReturnProbe: "uprobe_remoteMetricHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteRoleHandler",
+					EntryProbe:  "uprobe_remoteRoleHandler",
+					ReturnProbe: "uprobe_remoteRoleHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).remoteStashSizeHandler",
+					EntryProbe:  "uprobe_remoteStashSizeHandler",
+					ReturnProbe: "uprobe_remoteStashSizeHandler_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*relocator).Relocate",
 					EntryProbe:  "uprobe_Relocate",
 					ReturnProbe: "uprobe_Relocate_Returns",
-					FailureMode: probe.FailureModeWarn, // relocator is unexported; may be absent in some builds
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedError",
@@ -220,6 +344,10 @@ func processFn(e *event) ptrace.SpanSlice {
 		span.SetName("actor.systemSpawn")
 		span.SetKind(ptrace.SpanKindInternal)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn"))...)
+	case eventTypeSpawnOn:
+		span.SetName("actor.spawnOn")
+		span.SetKind(ptrace.SpanKindClient)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "spawn_on"))...)
 	case eventTypeSpawnChild:
 		span.SetName("actor.spawnChild")
 		span.SetKind(ptrace.SpanKindInternal)
@@ -252,6 +380,94 @@ func processFn(e *event) ptrace.SpanSlice {
 		span.SetName("actor.relocation")
 		span.SetKind(ptrace.SpanKindInternal)
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "relocation"))...)
+	case eventTypeRemoteTellGrain:
+		span.SetName("actor.remoteTellGrain")
+		span.SetKind(ptrace.SpanKindProducer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "send"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
+		)...)
+	case eventTypeRemoteAskGrain:
+		span.SetName("actor.remoteAskGrain")
+		span.SetKind(ptrace.SpanKindClient)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "request"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(sentTs)),
+		)...)
+	case eventTypeRemoteLookup:
+		span.SetName("actor.remoteLookup")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_lookup"))...)
+	case eventTypeRemoteReSpawn:
+		span.SetName("actor.remoteReSpawn")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_respawn"))...)
+	case eventTypeRemoteStop:
+		span.SetName("actor.remoteStop")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_stop"))...)
+	case eventTypeRemoteAskGrainReceive:
+		span.SetName("actor.remoteAskGrainReceive")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "receive"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+		)...)
+	case eventTypeRemoteTellGrainReceive:
+		span.SetName("actor.remoteTellGrainReceive")
+		span.SetKind(ptrace.SpanKindConsumer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "receive"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.received_timestamp", int64(receivedTs)),
+		)...)
+	case eventTypeRemoteActivateGrain:
+		span.SetName("actor.remoteActivateGrain")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_activate_grain"))...)
+	case eventTypeRemoteReinstate:
+		span.SetName("actor.remoteReinstate")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_reinstate"))...)
+	case eventTypeRemotePassivationStrategy:
+		span.SetName("actor.remotePassivationStrategy")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_passivation_strategy"))...)
+	case eventTypeRemoteState:
+		span.SetName("actor.remoteState")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_state"))...)
+	case eventTypeRemoteChildren:
+		span.SetName("actor.remoteChildren")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_children"))...)
+	case eventTypeRemoteParent:
+		span.SetName("actor.remoteParent")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_parent"))...)
+	case eventTypeRemoteKind:
+		span.SetName("actor.remoteKind")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_kind"))...)
+	case eventTypeRemoteDependencies:
+		span.SetName("actor.remoteDependencies")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_dependencies"))...)
+	case eventTypeRemoteMetric:
+		span.SetName("actor.remoteMetric")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_metric"))...)
+	case eventTypeRemoteRole:
+		span.SetName("actor.remoteRole")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_role"))...)
+	case eventTypeRemoteStashSize:
+		span.SetName("actor.remoteStashSize")
+		span.SetKind(ptrace.SpanKindServer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs, attribute.String("actor.operation", "remote_stash_size"))...)
 	default:
 		span.SetName("actor.unknown")
 		span.SetKind(ptrace.SpanKindInternal)

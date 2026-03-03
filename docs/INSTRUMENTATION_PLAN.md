@@ -1,6 +1,6 @@
 # Instrumentation and Testing Plan
 
-> **Status:** Phases 1–4 implemented. New probes: Spawn, SpawnChild, remoteSpawnHandler, remoteSpawnChildHandler, remoteTellHandler, remoteAskHandler, Relocate.
+> **Status:** Phases 1–6 and Part 2 implemented. Probes cover all remote server and client calls plus SpawnOn. Cross-platform: `make docker-test`, `make docker-generate`, `make docker-precommit`.
 
 ## Part 1: New Instrumentation Targets
 
@@ -13,7 +13,14 @@
 - **Attributes:** `actor.name`, `actor.kind` (if extractable)
 - **Notes:** Main spawn entry point; `SpawnOn`, `SpawnNamedFromFunc`, etc. may call into it or similar paths.
 
-**Optional:** `(*actorSystem).SpawnOn` for remote placement.
+### Phase 1b: SpawnOn (Optional — Implemented)
+
+**Target:** `(*actorSystem).SpawnOn`
+
+- **Symbol:** `github.com/tochemey/goakt/v4/actor.(*actorSystem).SpawnOn`
+- **Span:** `actor.spawnOn`
+- **Attributes:** `actor.operation=spawn_on`
+- **Notes:** Remote placement; uses `FailureModeWarn` (may be absent when cluster disabled).
 
 ---
 
@@ -31,12 +38,12 @@
 
 **Targets:** Remote handlers in `actor/remote_server.go` (receive side of remoting):
 
-| Handler | Symbol | Span Name |
-|---------|--------|-----------|
-| `remoteSpawnHandler` | `(*actorSystem).remoteSpawnHandler` | `actor.remoteSpawn` |
-| `remoteSpawnChildHandler` | `(*actorSystem).remoteSpawnChildHandler` | `actor.remoteSpawnChild` |
-| `remoteTellHandler` | `(*actorSystem).remoteTellHandler` | `actor.remoteTellReceive` |
-| `remoteAskHandler` | `(*actorSystem).remoteAskHandler` | `actor.remoteAskReceive` |
+| Handler                   | Symbol                                   | Span Name                 |
+|---------------------------|------------------------------------------|---------------------------|
+| `remoteSpawnHandler`      | `(*actorSystem).remoteSpawnHandler`      | `actor.remoteSpawn`       |
+| `remoteSpawnChildHandler` | `(*actorSystem).remoteSpawnChildHandler` | `actor.remoteSpawnChild`  |
+| `remoteTellHandler`       | `(*actorSystem).remoteTellHandler`       | `actor.remoteTellReceive` |
+| `remoteAskHandler`        | `(*actorSystem).remoteAskHandler`        | `actor.remoteAskReceive`  |
 
 - **Notes:** `remoteTellHandler` / `remoteAskHandler` complement existing `handleRemoteTell` / `handleRemoteAsk` (send side). Package is `actor`, but symbols live in `actor/remote_server.go` (same package).
 
@@ -55,12 +62,12 @@
 
 ### Implementation Order
 
-| Phase | Effort | Impact | Risk |
-|-------|--------|--------|------|
-| 1. Spawn | Low | High | Low |
-| 2. SpawnChild | Low | High | Low |
-| 3. TCP handlers | Medium | Medium | Low |
-| 4. Relocation | Medium | Medium | Medium |
+| Phase           | Effort | Impact | Risk   |
+|-----------------|--------|--------|--------|
+| 1. Spawn        | Low    | High   | Low    |
+| 2. SpawnChild   | Low    | High   | Low    |
+| 3. TCP handlers | Medium | Medium | Low    |
+| 4. Relocation   | Medium | Medium | Medium |
 
 ---
 
@@ -99,11 +106,13 @@ Or use `go tool nm` on the built binary to validate exact symbol names.
 
 ## Part 2: Cross-Platform Testing via Docker
 
+> **Status:** Implemented. Use `make docker-test` or `make docker-generate`. See [CONTRIBUTING.md](../CONTRIBUTING.md#running-tests-on-any-platform).
+
 eBPF requires Linux. Developers on macOS or Windows cannot run the full test suite natively. The [OpenTelemetry Go Instrumentation](https://github.com/open-telemetry/opentelemetry-go-instrumentation) project runs tests inside Docker, enabling cross-platform development.
 
 ### Approach (from OpenTelemetry Go Instrumentation)
 
-1. **Base Docker image** — Build an image with Go, clang, llvm, and libbpf-dev (Linux).
+1. **Base Docker image** — Build an image with Go, clang, llvm, libbpf-dev (Linux). Lint uses `golangci/golangci-lint` image.
 2. **Run tests inside container** — Mount the repo, run `go test` with `--privileged` (for eBPF tests).
 3. **Make targets** — `docker-test`, `docker-generate`, `docker-precommit` for common workflows.
 
@@ -210,17 +219,32 @@ CI already runs on `ubuntu-latest`, so tests run natively. The Docker-based appr
 
 ### Key Differences from OpenTelemetry
 
-| Aspect | OpenTelemetry Go Instrumentation | goakt-ebpf |
-|--------|----------------------------------|------------|
-| Base image | `golang:1.26-bookworm` + clang, llvm, libbpf-dev | Same (add clang, llvm, linux-headers) |
-| Test mount | `-v REPODIR:/usr/src/go.opentelemetry.io/auto` | `-v REPODIR:/app` |
-| Privileged | `--privileged` for eBPF tests | Same |
-| Docker socket | `-v /var/run/docker.sock` (for Docker-in-Docker) | Not needed for basic tests |
-| User | `--user=root` | Default (root) for privileged |
+| Aspect        | OpenTelemetry Go Instrumentation                 | goakt-ebpf                            |
+|---------------|--------------------------------------------------|---------------------------------------|
+| Base image    | `golang:1.26-bookworm` + clang, llvm, libbpf-dev | Same (add clang, llvm, linux-headers) |
+| Test mount    | `-v REPODIR:/usr/src/go.opentelemetry.io/auto`   | `-v REPODIR:/app`                     |
+| Privileged    | `--privileged` for eBPF tests                    | Same                                  |
+| Docker socket | `-v /var/run/docker.sock` (for Docker-in-Docker) | Not needed for basic tests            |
+| User          | `--user=root`                                    | Default (root) for privileged         |
 
 ### Summary
 
 - **`scripts/docker-test.sh`** — Run `go generate` + `go test` in Docker.
-- **Dockerfile base stage** — Linux image with Go + eBPF build tools.
-- **CONTRIBUTING.md** — Document `./scripts/docker-test.sh` for cross-platform users.
-- **Optional:** Makefile for `make docker-test` / `make docker-generate`.
+- **Dockerfile base stage** — Linux image with Go, clang, llvm, libbpf-dev, bpf2go.
+- **CONTRIBUTING.md** — Document `./scripts/docker-test.sh` and `make docker-precommit` for cross-platform users.
+- **Makefile** — `make docker-test`, `make docker-generate`, `make docker-precommit`.
+
+---
+
+## Part 3: Richer Span Attributes (Deferred)
+
+**Target:** Extract `actor.name`, `actor.kind`, `actor.parent` via StructFieldConst.
+
+**Requirements:**
+
+1. **Offset index** — Create JSON index of DWARF-derived offsets for GoAkt structs (e.g., `PID.path`, `path.name`, `path.system`).
+2. **StructFieldConst** — Add Const entries to the probe; inject offsets into BPF.
+3. **BPF reads** — Extend `goakt_actor_span_t` or event handling to read struct fields at injected offsets.
+4. **String handling** — Go strings are (ptr, len); eBPF must read from process memory with bounds checks.
+
+**Deferred:** Requires offset extraction tooling and GoAkt struct layout stability. See `internal/structfield` and `internal/inject` for the framework.

@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------
 FROM golang:1.26-bookworm AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    clang llvm linux-headers-generic ca-certificates \
+    clang llvm linux-headers-generic libbpf-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.20.0
 
