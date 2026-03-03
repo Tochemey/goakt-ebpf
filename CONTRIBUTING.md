@@ -11,17 +11,43 @@ We welcome contributions. This project adheres to [Conventional Commits](https:/
 
 1. Fork and clone the repository.
 2. Run `go mod tidy`.
-3. On non-Linux hosts, run `./scripts/generate-bpf.sh` to generate eBPF artifacts via Docker.
+3. On non-Linux hosts, run `make docker-generate` or `./scripts/generate-bpf.sh` to generate eBPF artifacts via Docker.
 
 ## Making Contributions
 
 1. Make your changes.
-2. Ensure tests pass:
-   - **On Linux:** `go test ./...`
-   - **On macOS/Windows:** Run tests via Docker: `./scripts/docker-test.sh` (see [Instrumentation Plan](docs/INSTRUMENTATION_PLAN.md#part-2-cross-platform-testing-via-docker))
+2. Ensure tests pass (see [Running Tests on Any Platform](#running-tests-on-any-platform)).
 3. Run the linter: `golangci-lint run`
 4. Commit using [Conventional Commits](https://www.conventionalcommits.org/).
 5. Open a pull request against `main`.
+
+## Running Tests on Any Platform
+
+eBPF requires Linux. On macOS or Windows, run the full test suite via Docker:
+
+```bash
+make docker-test
+```
+
+Or use the script directly:
+
+```bash
+./scripts/docker-test.sh
+```
+
+This builds a Linux base image, runs BPF generation, and executes all tests (including eBPF tests) inside the container. To regenerate BPF artifacts only:
+
+```bash
+make docker-generate
+```
+
+For a full pre-commit check (generate + test + lint):
+
+```bash
+make docker-precommit
+```
+
+**On Linux:** Run tests natively with `go test ./...`.
 
 ## Testing the Integration Example
 

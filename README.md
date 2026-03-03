@@ -178,22 +178,41 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 
 ## 🎯 Instrumentation Targets
 
-| Symbol                                   | Span                     | Attributes                                                  |
-|------------------------------------------|--------------------------|-------------------------------------------------------------|
-| `(*PID).doReceive`                       | actor.doReceive          | received_timestamp, handled_timestamp, handled_successfully |
-| `(*grainPID).handleGrainContext`         | actor.grainDoReceive     | received_timestamp, handled_timestamp, handled_successfully |
-| `(*actorSystem).handleRemoteTell`        | actor.remoteTell         | sent_timestamp                                              |
-| `(*actorSystem).handleRemoteAsk`         | actor.remoteAsk          | sent_timestamp                                              |
-| `(*actorSystem).remoteTellHandler`       | actor.remoteTellReceive  | received_timestamp                                          |
-| `(*actorSystem).remoteAskHandler`        | actor.remoteAskReceive   | received_timestamp                                          |
-| `(*actorSystem).Spawn`                   | actor.systemSpawn        | actor.operation=spawn                                       |
-| `(*actorSystem).remoteSpawnHandler`      | actor.remoteSpawn        | actor.operation=remote_spawn                                |
-| `(*actorSystem).remoteSpawnChildHandler` | actor.remoteSpawnChild   | actor.operation=remote_spawn_child                          |
-| `(*PID).process`                         | actor.process            | actor.type=pid                                              |
-| `(*PID).SpawnChild`                      | actor.spawnChild         | actor.operation=spawn_child                                 |
-| `(*grainPID).process`                    | actor.grainProcess       | actor.type=grain                                            |
-| `(*relocator).Relocate`                  | actor.relocation         | actor.operation=relocation (optional)                       |
-| `(*PID).handleReceivedError`             | (marks doReceive failed) | handled_successfully=false                                  |
+| Symbol                                            | Span                            | Attributes                                                  |
+|---------------------------------------------------|---------------------------------|-------------------------------------------------------------|
+| `(*PID).doReceive`                                | actor.doReceive                 | received_timestamp, handled_timestamp, handled_successfully |
+| `(*grainPID).handleGrainContext`                  | actor.grainDoReceive            | received_timestamp, handled_timestamp, handled_successfully |
+| `(*actorSystem).handleRemoteTell`                 | actor.remoteTell                | sent_timestamp                                              |
+| `(*actorSystem).handleRemoteAsk`                  | actor.remoteAsk                 | sent_timestamp                                              |
+| `(*actorSystem).remoteTellHandler`                | actor.remoteTellReceive         | received_timestamp                                          |
+| `(*actorSystem).remoteAskHandler`                 | actor.remoteAskReceive          | received_timestamp                                          |
+| `(*actorSystem).remoteTellGrain`                  | actor.remoteTellGrain           | sent_timestamp (grain client)                               |
+| `(*actorSystem).remoteAskGrain`                   | actor.remoteAskGrain            | sent_timestamp (grain client)                               |
+| `(*actorSystem).Spawn`                            | actor.systemSpawn               | actor.operation=spawn                                       |
+| `(*actorSystem).SpawnOn`                          | actor.spawnOn                   | actor.operation=spawn_on (remote placement, optional)       |
+| `(*actorSystem).remoteSpawnHandler`               | actor.remoteSpawn               | actor.operation=remote_spawn                                |
+| `(*actorSystem).remoteSpawnChildHandler`          | actor.remoteSpawnChild          | actor.operation=remote_spawn_child                          |
+| `(*actorSystem).remoteLookupHandler`              | actor.remoteLookup              | actor.operation=remote_lookup                               |
+| `(*actorSystem).remoteReSpawnHandler`             | actor.remoteReSpawn             | actor.operation=remote_respawn                              |
+| `(*actorSystem).remoteStopHandler`                | actor.remoteStop                | actor.operation=remote_stop                                 |
+| `(*actorSystem).remoteAskGrainHandler`            | actor.remoteAskGrainReceive     | received_timestamp (grain server)                           |
+| `(*actorSystem).remoteTellGrainHandler`           | actor.remoteTellGrainReceive    | received_timestamp (grain server)                           |
+| `(*actorSystem).remoteActivateGrainHandler`       | actor.remoteActivateGrain       | actor.operation=remote_activate_grain                       |
+| `(*actorSystem).remoteReinstateHandler`           | actor.remoteReinstate           | actor.operation=remote_reinstate                            |
+| `(*actorSystem).remotePassivationStrategyHandler` | actor.remotePassivationStrategy | (optional)                                                  |
+| `(*actorSystem).remoteStateHandler`               | actor.remoteState               | (optional)                                                  |
+| `(*actorSystem).remoteChildrenHandler`            | actor.remoteChildren            | (optional)                                                  |
+| `(*actorSystem).remoteParentHandler`              | actor.remoteParent              | (optional)                                                  |
+| `(*actorSystem).remoteKindHandler`                | actor.remoteKind                | (optional)                                                  |
+| `(*actorSystem).remoteDependenciesHandler`        | actor.remoteDependencies        | (optional)                                                  |
+| `(*actorSystem).remoteMetricHandler`              | actor.remoteMetric              | (optional)                                                  |
+| `(*actorSystem).remoteRoleHandler`                | actor.remoteRole                | (optional)                                                  |
+| `(*actorSystem).remoteStashSizeHandler`           | actor.remoteStashSize           | (optional)                                                  |
+| `(*PID).process`                                  | actor.process                   | actor.type=pid                                              |
+| `(*PID).SpawnChild`                               | actor.spawnChild                | actor.operation=spawn_child                                 |
+| `(*grainPID).process`                             | actor.grainProcess              | actor.type=grain                                            |
+| `(*relocator).Relocate`                           | actor.relocation                | actor.operation=relocation (optional)                       |
+| `(*PID).handleReceivedError`                      | (marks doReceive failed)        | handled_successfully=false                                  |
 
 ## 🔄 How It Works
 

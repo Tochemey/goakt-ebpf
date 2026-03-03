@@ -122,7 +122,7 @@ func run(logger *slog.Logger, pid int) error {
 	defer cancel(nil)
 	go watchTarget(ctx, procID, cancel)
 
-	handler, err := otelsdk.NewHandler(ctx, otelsdk.WithLogger(logger))
+	handler, err := otelsdk.NewHandler(ctx, otelsdk.WithLogger(logger), otelsdk.WithEnv())
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}
