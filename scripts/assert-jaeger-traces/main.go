@@ -53,12 +53,12 @@ func main() {
 	}
 
 	var (
-		totalSpans         int
-		processWithParent  int
-		processTotal       int
-		receiveWithParent  int
-		receiveTotal       int
-		multiSpanTraces    int
+		totalSpans        int
+		processWithParent int
+		processTotal      int
+		receiveWithParent int
+		receiveTotal      int
+		multiSpanTraces   int
 	)
 
 	for _, t := range traces {
@@ -171,7 +171,15 @@ func fetchTraces(baseURL, service string) []trace {
 
 func fetchServiceTraces(baseURL, service string) []trace {
 	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
-	resp, err := http.Get(rawURL)
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return nil
+	}
+	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil
 	}
