@@ -40,6 +40,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64,linux/386
           tags: ghcr.io/${{ steps.version.outputs.repo }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
