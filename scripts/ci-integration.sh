@@ -36,6 +36,9 @@ echo "=== Building goakt-ebpf agent ==="
 go build -o /tmp/goakt-ebpf ./cmd/cli/...
 
 echo "=== Starting integration app in background ==="
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+OTEL_SERVICE_NAME=integration-app \
 /tmp/integration-app &
 APP_PID=$!
 sleep 3

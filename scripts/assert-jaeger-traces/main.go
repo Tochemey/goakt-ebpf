@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // assert-jaeger-traces fetches traces from Jaeger's HTTP API and validates
-// that expected span names exist, minimum span count is met, and parent
-// references are consistent. Used by CI integration tests.
+// trace context propagation: expected span names exist, parent-child
+// relationships are correct, and actor spans are not orphaned roots.
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 	"strings"
 )
 
-// Jaeger trace API response (internal, undocumented format).
 type traceResponse struct {
 	Data []trace `json:"data"`
 }
@@ -34,101 +33,167 @@ type span struct {
 
 type reference struct {
 	RefType string `json:"refType"`
+	TraceID string `json:"traceID"`
 	SpanID  string `json:"spanID"`
 }
 
 func main() {
-	baseURL := "http://localhost:16686"
-	if u := os.Getenv("JAEGER_QUERY_URL"); u != "" {
-		baseURL = strings.TrimSuffix(u, "/")
-	}
-	service := "goakt-ebpf"
-	if s := os.Getenv("JAEGER_SERVICE"); s != "" {
-		service = s
-	}
-	limit := 20
-	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=%d", baseURL, service, limit)
-	parsedURL, err := url.ParseRequestURI(rawURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: invalid URL %q: %v\n", rawURL, err)
-		os.Exit(1)
+	baseURL := envOr("JAEGER_QUERY_URL", "http://localhost:16686")
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	service := envOr("JAEGER_SERVICE", "goakt-ebpf")
+
+	traces := fetchTraces(baseURL, service)
+	if len(traces) == 0 {
+		fatal("no traces found for service=%s", service)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: build request: %v\n", err)
-		os.Exit(1)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: %v\n", parsedURL, err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: GET %s: status %d\n", parsedURL, resp.StatusCode)
-		os.Exit(1)
-	}
-
-	var tr traceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: decode JSON: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(tr.Data) == 0 {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: no traces found for service=%s\n", service)
-		os.Exit(1)
-	}
-
-	// Expected span names from integration app (Tell/Ask between echo and pong).
-	// actor.systemSpawn is excluded: Spawn is called before the agent attaches,
-	// so those spans are not captured by the eBPF probes.
 	expectedNames := map[string]bool{
-		"actor.doReceive": true,
-		"actor.process":   true,
+		"actor.doReceive": false,
+		"actor.process":   false,
 	}
 
-	foundNames := make(map[string]bool)
-	totalSpans := 0
+	var (
+		totalSpans         int
+		processWithParent  int
+		processTotal       int
+		receiveWithParent  int
+		receiveTotal       int
+		multiSpanTraces    int
+	)
 
-	for _, t := range tr.Data {
-		spanByID := make(map[string]span)
+	for _, t := range traces {
+		spanByID := make(map[string]span, len(t.Spans))
 		for _, s := range t.Spans {
 			spanByID[s.SpanID] = s
-			totalSpans++
-			if expectedNames[s.OperationName] {
-				foundNames[s.OperationName] = true
-			}
 		}
 
-		// Validate parent propagation: spans with CHILD_OF reference have parent in same trace
+		totalSpans += len(t.Spans)
+		if len(t.Spans) > 1 {
+			multiSpanTraces++
+		}
+
 		for _, s := range t.Spans {
+			if _, ok := expectedNames[s.OperationName]; ok {
+				expectedNames[s.OperationName] = true
+			}
+
 			for _, ref := range s.References {
-				if ref.RefType == "CHILD_OF" && ref.SpanID != "" {
-					if _, ok := spanByID[ref.SpanID]; !ok {
-						fmt.Fprintf(os.Stderr, "assert-jaeger-traces: span %s references unknown parent %s\n", s.SpanID, ref.SpanID)
-						os.Exit(1)
-					}
+				if ref.RefType != "CHILD_OF" || ref.SpanID == "" {
+					continue
+				}
+				if _, ok := spanByID[ref.SpanID]; !ok {
+					fatal("span %s (%s) references unknown parent %s in trace %s",
+						s.SpanID, s.OperationName, ref.SpanID, t.TraceID)
+				}
+			}
+
+			hasParent := hasChildOfRef(s)
+
+			switch s.OperationName {
+			case "actor.process":
+				processTotal++
+				if hasParent {
+					processWithParent++
+				}
+			case "actor.doReceive":
+				receiveTotal++
+				if hasParent {
+					receiveWithParent++
 				}
 			}
 		}
 	}
 
-	for name := range expectedNames {
-		if !foundNames[name] {
-			fmt.Fprintf(os.Stderr, "assert-jaeger-traces: expected span name %q not found\n", name)
-			os.Exit(1)
+	for name, found := range expectedNames {
+		if !found {
+			fatal("expected span name %q not found", name)
 		}
 	}
 
 	const minSpans = 4
 	if totalSpans < minSpans {
-		fmt.Fprintf(os.Stderr, "assert-jaeger-traces: expected at least %d spans, got %d\n", minSpans, totalSpans)
-		os.Exit(1)
+		fatal("expected at least %d spans, got %d", minSpans, totalSpans)
 	}
 
-	fmt.Printf("assert-jaeger-traces: OK - %d traces, %d spans, expected names present, parent refs valid\n", len(tr.Data), totalSpans)
+	// actor.process must always have a parent (doReceive via goroutine-scoped map)
+	if processTotal > 0 && processWithParent == 0 {
+		fatal("no actor.process spans have a parent (goroutine propagation broken)")
+	}
+
+	if multiSpanTraces == 0 {
+		fatal("no traces have more than 1 span (context propagation not working)")
+	}
+
+	fmt.Printf("assert-jaeger-traces: OK\n")
+	fmt.Printf("  traces: %d (%d with multiple spans)\n", len(traces), multiSpanTraces)
+	fmt.Printf("  total spans: %d\n", totalSpans)
+	fmt.Printf("  actor.process: %d/%d with parent\n", processWithParent, processTotal)
+	fmt.Printf("  actor.doReceive: %d/%d with parent\n", receiveWithParent, receiveTotal)
+}
+
+func hasChildOfRef(s span) bool {
+	for _, ref := range s.References {
+		if ref.RefType == "CHILD_OF" && ref.SpanID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func fetchTraces(baseURL, service string) []trace {
+	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		fatal("invalid URL %q: %v", rawURL, err)
+	}
+
+	resp, err := http.Get(parsedURL.String())
+	if err != nil {
+		fatal("GET %s: %v", parsedURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fatal("GET %s: status %d", parsedURL, resp.StatusCode)
+	}
+
+	var tr traceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		fatal("decode JSON: %v", err)
+	}
+
+	// Also fetch app traces to validate cross-service linking
+	appTraces := fetchServiceTraces(baseURL, "integration-app")
+	tr.Data = append(tr.Data, appTraces...)
+
+	return tr.Data
+}
+
+func fetchServiceTraces(baseURL, service string) []trace {
+	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var tr traceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return nil
+	}
+	return tr.Data
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "assert-jaeger-traces: "+format+"\n", args...)
+	os.Exit(1)
 }

@@ -88,6 +88,76 @@ Full reference of probe targets, span names, and attributes:
 | `(*relocator).Relocate`                           | actor.relocation                | actor.operation=relocation (optional)                       |
 | `(*PID).handleReceivedError`                      | (marks doReceive failed)        | handled_successfully=false                                  |
 
+## Trace Context Propagation
+
+goakt-ebpf runs as a separate process and attaches via uprobes. Without context propagation, every span starts a new trace and appears disconnected in Jaeger/Tempo. Three mechanisms connect spans into coherent traces:
+
+### In-Kernel Context Chain
+
+Every probe that has access to `context.Context` calls `get_Go_context()` to read the context interface from function arguments. After creating a span, `start_tracking_span()` registers the span context in the `go_context_to_sc` map. Child calls on the same context chain find the parent via `get_parent_span_context()`, which walks the context chain looking for registered entries.
+
+`start_span_and_store` accepts per-probe parameters (`context_pos`, `context_offset`, `passed_as_arg`) to handle both patterns:
+
+| Context source | `passed_as_arg` | `context_pos` | `context_offset` |
+|---|---|---|---|
+| `context.Context` as direct arg (e.g. `Spawn`, `handleRemoteTell`) | true | 2 | 0 |
+| `context.Context` inside struct (e.g. `ReceiveContext`) | false | 2 | DWARF offset |
+| No context (e.g. `process()`) | — | 0 | — |
+
+This links spans that share a context (e.g. `actor.doReceive` as parent of nested calls via the same context). It does not help when the parent span comes from application-level OTEL, since `go_context_to_sc` only contains spans created by goakt-ebpf probes.
+
+### Goroutine-Scoped Span Map
+
+A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propagates context within the same goroutine. On span start, the map is updated; on span end, the entry is deleted. Lookup tries this map first, then falls back to the context chain.
+
+This links `actor.process` as a child of `actor.doReceive` since they run on the same goroutine. It does not connect spans across goroutines (e.g. remoting goroutine to actor goroutine).
+
+### Userspace Context Reading
+
+When BPF-side lookup finds no parent and `context_ptr` is non-zero, userspace reads the target process memory via `process_vm_readv(2)` to extract an OTEL span context from the Go `context.Context` chain.
+
+The reader speculatively walks the chain, treating each node as a `valueCtx` (48 bytes). For each node it reads `val.data` and checks whether the pointed-to value looks like a `nonRecordingSpan`:
+
+```
+valueCtx (48 bytes):
+  [0:8]   Context.itab     [8:16]  Context.data  -> parent context
+  [16:24] key.type         [24:32] key.data
+  [32:40] val.type         [40:48] val.data      -> nonRecordingSpan ptr
+
+nonRecordingSpan:
+  [0:16]  noopSpan (embedded.Span interface, always nil = zeros)
+  [16:32] SpanContext.traceID  [16]byte
+  [32:40] SpanContext.spanID   [8]byte
+  [40]    SpanContext.traceFlags byte
+```
+
+Validation: first 16 bytes (noopSpan) must be zero; both TraceID and SpanID must be non-zero. Non-valueCtx nodes produce either read failures or invalid data, which the validation catches.
+
+This connects goakt-ebpf spans to application-level OTEL spans and to remote trace context injected by GoAkt's `ContextPropagator`.
+
+**Limitations:**
+- `valueCtx` layout is stable since Go 1.7 but not a public API.
+- `nonRecordingSpan` layout depends on the OTEL SDK version.
+- Requires `CAP_SYS_PTRACE` (already required for uprobes).
+
+### Context Extraction by Method
+
+| Symbol | Context source | `passed_as_arg` | `context_pos` | `context_offset` |
+|---|---|---|---|---|
+| `(*PID).doReceive` | ReceiveContext | false | 2 | DWARF: `ReceiveContext.Context` |
+| `(*grainPID).handleGrainContext` | ReceiveContext | false | 2 | DWARF: `ReceiveContext.Context` |
+| `(*actorSystem).handleRemoteTell` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).handleRemoteAsk` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).Spawn` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).SpawnOn` | Direct arg | true | 2 | 0 |
+| `(*PID).SpawnChild` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).remote*Handler` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).remoteTellGrain` | Direct arg | true | 2 | 0 |
+| `(*actorSystem).remoteAskGrain` | Direct arg | true | 2 | 0 |
+| `(*relocator).Relocate` | Direct arg | true | 2 | 0 |
+| `(*PID).process` | No context | — | 0 | — |
+| `(*grainPID).process` | No context | — | 0 | — |
+
 ## Dependencies
 
 - **Cilium eBPF** — Load and attach eBPF programs.

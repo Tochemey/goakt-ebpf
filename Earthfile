@@ -60,10 +60,28 @@ generate:
 build:
     FROM +generate
     RUN CGO_ENABLED=0 go build -o goakt-ebpf ./cmd/cli/...
-    SAVE ARTIFACT goakt-ebpf AS LOCAL goakt-ebpf
+    SAVE ARTIFACT goakt-ebpf AS LOCAL bin/goakt-ebpf
 
 # -----------------------------------------------------------------------------
 # all: Default target - deps and build
 # -----------------------------------------------------------------------------
 all:
     BUILD +build
+
+# -----------------------------------------------------------------------------
+# docker: Build a Docker image tagged goakt-ebpf:dev for linux/amd64 and linux/arm64
+# Run: earthly +docker
+# -----------------------------------------------------------------------------
+docker:
+    BUILD --platform=linux/amd64 +docker-image
+    BUILD --platform=linux/arm64 +docker-image
+
+docker-image:
+    FROM debian:bookworm-slim
+    RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+        && rm -rf /var/lib/apt/lists/* \
+        && adduser --disabled-password --gecos "" --uid 65532 appuser
+    COPY (+build/goakt-ebpf) /usr/local/bin/goakt-ebpf
+    USER appuser
+    ENTRYPOINT ["/usr/local/bin/goakt-ebpf"]
+    SAVE IMAGE goakt-ebpf:dev

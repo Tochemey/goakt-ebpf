@@ -10,8 +10,8 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
     networks:
       - goakt-ebpf-net
 
@@ -21,19 +21,24 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"  # UI
+      - "16686:16686" # UI
     networks:
       - goakt-ebpf-net
 
-  # Minimal GoAkt app - target for eBPF instrumentation
+  # GoAkt app with OTEL tracing — target for eBPF instrumentation
   goakt-app:
     container_name: goakt-app
     build:
       context: .
       dockerfile: Dockerfile.app
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: integration-app
+    depends_on:
+      - otel-collector
     networks:
       - goakt-ebpf-net
-    # Keep running for the agent to attach
     stdin_open: true
     tty: true
 
@@ -43,7 +48,7 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    privileged: true  # Required for eBPF uprobe attachment to target process
+    privileged: true # Required for eBPF uprobe attachment to target process
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
@@ -51,11 +56,12 @@ services:
     depends_on:
       - otel-collector
       - goakt-app
-    pid: "container:goakt-app"  # Share PID namespace to attach to app
+    pid: "container:goakt-app" # Share PID namespace to attach to app
     networks:
       - goakt-ebpf-net
     # Wait for goakt-app to be ready, then attach (app is PID 1 in shared PID namespace)
-    entrypoint: ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]
+    entrypoint:
+      ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]
 
 networks:
   goakt-ebpf-net:

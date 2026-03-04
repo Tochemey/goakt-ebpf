@@ -12,10 +12,9 @@ import (
 	"strings"
 	"syscall"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/Masterminds/semver/v3"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/kernel"
 )

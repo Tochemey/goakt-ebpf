@@ -5,11 +5,12 @@
 // (https://github.com/open-telemetry/opentelemetry-go-instrumentation).
 
 #include "arguments.h"
-#include "trace/span_context.h"
+#include "goakt_context.h"
 #include "go_context.h"
-#include "uprobe.h"
+#include "trace/span_context.h"
 #include "trace/span_output.h"
 #include "trace/start_span.h"
+#include "uprobe.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
@@ -53,6 +54,7 @@ struct goakt_actor_span_t {
 	u8 handled_successfully; /* 1 = success, 0 = failure (handleReceivedError called) */
 	u8 padding[6];
 	BASE_SPAN_PROPERTIES
+	u64 context_ptr; /* context.Context data pointer for userspace trace extraction */
 };
 
 struct uprobe_data_t {
@@ -291,9 +293,48 @@ struct {
 	__uint(max_entries, 1);
 } goakt_actor_uprobe_storage_map SEC(".maps");
 
+// Goroutine-scoped span map for same-goroutine propagation.
+// Methods like process() have no context arg; they inherit from doReceive via goid.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *); /* goroutine ID */
+	__type(value, struct span_context);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_goid_to_span_context SEC(".maps");
+
+// get_parent_span_context_goid_first tries goid map first, then go_context chain.
+// Used as get_parent_span_context_fn so process() and grainPID.process() inherit.
+struct goid_parent_handle {
+	struct pt_regs *ctx;
+	struct go_iface *go_context;
+};
+
+static long get_parent_span_context_goid_first(void *handle, struct span_context *psc) {
+	struct goid_parent_handle *h = (struct goid_parent_handle *)handle;
+	void *goid = (void *)GOROUTINE(h->ctx);
+
+	struct span_context *from_goid =
+		bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &goid);
+	if (from_goid != NULL) {
+		*psc = *from_goid;
+		return 0;
+	}
+
+	struct span_context *from_ctx = get_parent_span_context(h->go_context);
+	if (from_ctx != NULL) {
+		*psc = *from_ctx;
+		return 0;
+	}
+	return -1;
+}
+
+// Context extraction params: context_pos 0 = no context (e.g. process()).
+// passed_as_arg: 1 = context.Context as direct arg, 0 = context inside struct.
 static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 						 struct uprobe_data_t *uprobe_data,
-						 u8 event_type, void *map) {
+						 u8 event_type, void *map,
+						 int context_pos, u64 context_offset,
+						 bool passed_as_arg) {
 	__builtin_memset(uprobe_data, 0, sizeof(struct uprobe_data_t));
 
 	struct goakt_actor_span_t *span = &uprobe_data->span;
@@ -302,14 +343,31 @@ static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 	span->start_time = bpf_ktime_get_ns();
 
 	struct go_iface go_context = {0};
+	if (context_pos > 0) {
+		get_Go_context(ctx, context_pos, context_offset, passed_as_arg,
+				&go_context);
+	}
+
+	struct goid_parent_handle goid_handle = {
+		.ctx = ctx,
+		.go_context = &go_context,
+	};
 	start_span_params_t start_span_params = {
 		.ctx = ctx,
 		.go_context = &go_context,
 		.psc = &span->psc,
 		.sc = &span->sc,
-		.get_parent_span_context_fn = NULL,
+		.get_parent_span_context_fn = get_parent_span_context_goid_first,
+		.get_parent_span_context_arg = &goid_handle,
 	};
 	start_span(&start_span_params);
+
+	if (go_context.data != NULL) {
+		start_tracking_span(go_context.data, &span->sc);
+		span->context_ptr = (u64)(long)go_context.data;
+	}
+
+	bpf_map_update_elem(&goakt_actor_goid_to_span_context, &key, &span->sc, 0);
 
 	bpf_map_update_elem(map, &key, uprobe_data, 0);
 }
@@ -328,6 +386,8 @@ static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *ke
 
 	output_span_event(ctx, span, sizeof(*span), &span->sc);
 	stop_tracking_span(&span->sc, &span->psc);
+	bpf_map_delete_elem(&goakt_actor_goid_to_span_context, &key);
+
 	bpf_map_delete_elem(map, &key);
 }
 
@@ -347,7 +407,8 @@ int uprobe_doReceive(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_DO_RECEIVE,
-			    &goakt_actor_do_receive);
+			    &goakt_actor_do_receive, 2,
+			    receive_context_ctx_offset, false);
 	return 0;
 }
 
@@ -374,7 +435,7 @@ int uprobe_handleRemoteTell(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_TELL,
-			    &goakt_actor_remote_tell);
+			    &goakt_actor_remote_tell, 2, 0, true);
 	return 0;
 }
 
@@ -401,7 +462,7 @@ int uprobe_handleRemoteAsk(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ASK,
-			    &goakt_actor_remote_ask);
+			    &goakt_actor_remote_ask, 2, 0, true);
 	return 0;
 }
 
@@ -428,7 +489,7 @@ int uprobe_process(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_PROCESS,
-			    &goakt_actor_process);
+			    &goakt_actor_process, 0, 0, false);
 	return 0;
 }
 
@@ -455,7 +516,7 @@ int uprobe_grainPID_process(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_PROCESS,
-			    &goakt_actor_grain_process);
+			    &goakt_actor_grain_process, 0, 0, false);
 	return 0;
 }
 
@@ -482,7 +543,8 @@ int uprobe_handleGrainContext(struct pt_regs *ctx) {
 	}
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_DO_RECEIVE,
-			    &goakt_actor_grain_do_receive);
+			    &goakt_actor_grain_do_receive, 2,
+			    receive_context_ctx_offset, false);
 	return 0;
 }
 
@@ -507,7 +569,7 @@ int uprobe_Spawn(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SYSTEM_SPAWN,
-			    &goakt_actor_system_spawn);
+			    &goakt_actor_system_spawn, 2, 0, true);
 	return 0;
 }
 
@@ -532,7 +594,7 @@ int uprobe_SpawnOn(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SPAWN_ON,
-			    &goakt_actor_spawn_on);
+			    &goakt_actor_spawn_on, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/SpawnOn_Returns")
@@ -556,7 +618,7 @@ int uprobe_SpawnChild(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SPAWN_CHILD,
-			    &goakt_actor_spawn_child);
+			    &goakt_actor_spawn_child, 2, 0, true);
 	return 0;
 }
 
@@ -581,7 +643,7 @@ int uprobe_remoteSpawnHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_SPAWN,
-			    &goakt_actor_remote_spawn);
+			    &goakt_actor_remote_spawn, 2, 0, true);
 	return 0;
 }
 
@@ -606,7 +668,7 @@ int uprobe_remoteSpawnChildHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_SPAWN_CHILD,
-			    &goakt_actor_remote_spawn_child);
+			    &goakt_actor_remote_spawn_child, 2, 0, true);
 	return 0;
 }
 
@@ -631,7 +693,7 @@ int uprobe_remoteTellHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_TELL_RECEIVE,
-			    &goakt_actor_remote_tell_receive);
+			    &goakt_actor_remote_tell_receive, 2, 0, true);
 	return 0;
 }
 
@@ -656,7 +718,7 @@ int uprobe_remoteAskHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ASK_RECEIVE,
-			    &goakt_actor_remote_ask_receive);
+			    &goakt_actor_remote_ask_receive, 2, 0, true);
 	return 0;
 }
 
@@ -681,7 +743,7 @@ int uprobe_Relocate(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_RELOCATION,
-			    &goakt_actor_relocation);
+			    &goakt_actor_relocation, 2, 0, true);
 	return 0;
 }
 
@@ -706,7 +768,7 @@ int uprobe_remoteTellGrain(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_TELL_GRAIN,
-			    &goakt_actor_remote_tell_grain);
+			    &goakt_actor_remote_tell_grain, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteTellGrain_Returns")
@@ -730,7 +792,7 @@ int uprobe_remoteAskGrain(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ASK_GRAIN,
-			    &goakt_actor_remote_ask_grain);
+			    &goakt_actor_remote_ask_grain, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteAskGrain_Returns")
@@ -754,7 +816,7 @@ int uprobe_remoteLookupHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_LOOKUP,
-			    &goakt_actor_remote_lookup);
+			    &goakt_actor_remote_lookup, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteLookupHandler_Returns")
@@ -778,7 +840,7 @@ int uprobe_remoteReSpawnHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_RE_SPAWN,
-			    &goakt_actor_remote_re_spawn);
+			    &goakt_actor_remote_re_spawn, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteReSpawnHandler_Returns")
@@ -802,7 +864,7 @@ int uprobe_remoteStopHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_STOP,
-			    &goakt_actor_remote_stop);
+			    &goakt_actor_remote_stop, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteStopHandler_Returns")
@@ -826,7 +888,7 @@ int uprobe_remoteAskGrainHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ASK_GRAIN_RECEIVE,
-			    &goakt_actor_remote_ask_grain_receive);
+			    &goakt_actor_remote_ask_grain_receive, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteAskGrainHandler_Returns")
@@ -850,7 +912,7 @@ int uprobe_remoteTellGrainHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_TELL_GRAIN_RECEIVE,
-			    &goakt_actor_remote_tell_grain_receive);
+			    &goakt_actor_remote_tell_grain_receive, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteTellGrainHandler_Returns")
@@ -874,7 +936,7 @@ int uprobe_remoteActivateGrainHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ACTIVATE_GRAIN,
-			    &goakt_actor_remote_activate_grain);
+			    &goakt_actor_remote_activate_grain, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteActivateGrainHandler_Returns")
@@ -898,7 +960,7 @@ int uprobe_remoteReinstateHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_REINSTATE,
-			    &goakt_actor_remote_reinstate);
+			    &goakt_actor_remote_reinstate, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteReinstateHandler_Returns")
@@ -922,7 +984,7 @@ int uprobe_remotePassivationStrategyHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_PASSIVATION_STRATEGY,
-			    &goakt_actor_remote_passivation_strategy);
+			    &goakt_actor_remote_passivation_strategy, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remotePassivationStrategyHandler_Returns")
@@ -946,7 +1008,7 @@ int uprobe_remoteStateHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_STATE,
-			    &goakt_actor_remote_state);
+			    &goakt_actor_remote_state, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteStateHandler_Returns")
@@ -970,7 +1032,7 @@ int uprobe_remoteChildrenHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_CHILDREN,
-			    &goakt_actor_remote_children);
+			    &goakt_actor_remote_children, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteChildrenHandler_Returns")
@@ -994,7 +1056,7 @@ int uprobe_remoteParentHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_PARENT,
-			    &goakt_actor_remote_parent);
+			    &goakt_actor_remote_parent, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteParentHandler_Returns")
@@ -1018,7 +1080,7 @@ int uprobe_remoteKindHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_KIND,
-			    &goakt_actor_remote_kind);
+			    &goakt_actor_remote_kind, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteKindHandler_Returns")
@@ -1042,7 +1104,7 @@ int uprobe_remoteDependenciesHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_DEPENDENCIES,
-			    &goakt_actor_remote_dependencies);
+			    &goakt_actor_remote_dependencies, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteDependenciesHandler_Returns")
@@ -1066,7 +1128,7 @@ int uprobe_remoteMetricHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_METRIC,
-			    &goakt_actor_remote_metric);
+			    &goakt_actor_remote_metric, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteMetricHandler_Returns")
@@ -1090,7 +1152,7 @@ int uprobe_remoteRoleHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_ROLE,
-			    &goakt_actor_remote_role);
+			    &goakt_actor_remote_role, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteRoleHandler_Returns")
@@ -1114,7 +1176,7 @@ int uprobe_remoteStashSizeHandler(struct pt_regs *ctx) {
 		return 0;
 	}
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_REMOTE_STASH_SIZE,
-			    &goakt_actor_remote_stash_size);
+			    &goakt_actor_remote_stash_size, 2, 0, true);
 	return 0;
 }
 SEC("uprobe/remoteStashSizeHandler_Returns")
