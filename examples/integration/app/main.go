@@ -1,8 +1,9 @@
 // Copyright (c) 2026 The GoAkt eBPF Authors.
 // SPDX-License-Identifier: Apache-2.0
 
-// Minimal GoAkt app for goakt-ebpf integration testing.
-// Sends Tell and Ask messages between two actors.
+// Integration test app for goakt-ebpf trace context propagation.
+// Creates application-level OTEL spans around Tell/Ask so the eBPF agent
+// can link actor spans (doReceive, process) as children of these app spans.
 package main
 
 import (
@@ -14,11 +15,27 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	shutdown, err := initTracer(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "init tracer:", err)
+		os.Exit(1)
+	}
+	defer func() { _ = shutdown(context.Background()) }()
+
+	tracer := otel.Tracer("integration-app")
 
 	sys, err := actor.NewActorSystem("test-system")
 	if err != nil {
@@ -44,15 +61,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Send messages periodically so the agent (which attaches after ~3s) can capture traces.
-	// Initial burst, then every 5s until stopped.
-	actor.Tell(ctx, echo, "hello")
-	res, err := actor.Ask(ctx, pong, "ping", 2*time.Second)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Ask:", err)
-	} else {
-		_ = res // "pong"
-	}
+	sendMessages(ctx, tracer, echo, pong)
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -61,29 +70,60 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			actor.Tell(ctx, echo, "hello")
-			if _, err := actor.Ask(ctx, pong, "ping", 2*time.Second); err != nil {
-				fmt.Fprintln(os.Stderr, "Ask:", err)
-			}
+			sendMessages(ctx, tracer, echo, pong)
 		}
 	}
 }
 
+func sendMessages(ctx context.Context, tracer trace.Tracer, echo, pong *actor.PID) {
+	ctx, tellSpan := tracer.Start(ctx, "send-tell")
+	actor.Tell(ctx, echo, "hello")
+	tellSpan.End()
+
+	ctx, askSpan := tracer.Start(ctx, "send-ask")
+	if _, err := actor.Ask(ctx, pong, "ping", 2*time.Second); err != nil {
+		fmt.Fprintln(os.Stderr, "Ask:", err)
+	}
+	askSpan.End()
+}
+
+func initTracer(ctx context.Context) (func(context.Context) error, error) {
+	exporter, err := otlptracehttp.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("create OTLP exporter: %w", err)
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceName("integration-app")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create resource: %w", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	return tp.Shutdown, nil
+}
+
 type echoActor struct{}
 
-func (a *echoActor) PreStart(ctx *actor.Context) error { return nil }
-func (a *echoActor) PostStop(ctx *actor.Context) error { return nil }
+func (a *echoActor) PreStart(*actor.Context) error { return nil }
+func (a *echoActor) PostStop(*actor.Context) error { return nil }
 func (a *echoActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case string:
-		// no-op
 	}
 }
 
 type pongActor struct{}
 
-func (a *pongActor) PreStart(ctx *actor.Context) error { return nil }
-func (a *pongActor) PostStop(ctx *actor.Context) error { return nil }
+func (a *pongActor) PreStart(*actor.Context) error { return nil }
+func (a *pongActor) PostStop(*actor.Context) error { return nil }
 func (a *pongActor) Receive(ctx *actor.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case string:

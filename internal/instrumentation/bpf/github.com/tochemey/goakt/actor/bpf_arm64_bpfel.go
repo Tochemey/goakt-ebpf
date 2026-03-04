@@ -37,6 +37,7 @@ type bpfUprobeDataT struct {
 		EndTime             uint64
 		Sc                  bpfSpanContext
 		Psc                 bpfSpanContext
+		ContextPtr          uint64
 	}
 }
 
@@ -157,6 +158,7 @@ type bpfMapSpecs struct {
 	Events                              *ebpf.MapSpec `ebpf:"events"`
 	GoContextToSc                       *ebpf.MapSpec `ebpf:"go_context_to_sc"`
 	GoaktActorDoReceive                 *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
+	GoaktActorGoidToSpanContext         *ebpf.MapSpec `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.MapSpec `ebpf:"goakt_actor_grain_process"`
 	GoaktActorProcess                   *ebpf.MapSpec `ebpf:"goakt_actor_process"`
@@ -199,10 +201,11 @@ type bpfMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfVariableSpecs struct {
-	EndAddr   *ebpf.VariableSpec `ebpf:"end_addr"`
-	Hex       *ebpf.VariableSpec `ebpf:"hex"`
-	StartAddr *ebpf.VariableSpec `ebpf:"start_addr"`
-	TotalCpus *ebpf.VariableSpec `ebpf:"total_cpus"`
+	EndAddr                 *ebpf.VariableSpec `ebpf:"end_addr"`
+	Hex                     *ebpf.VariableSpec `ebpf:"hex"`
+	ReceiveContextCtxOffset *ebpf.VariableSpec `ebpf:"receive_context_ctx_offset"`
+	StartAddr               *ebpf.VariableSpec `ebpf:"start_addr"`
+	TotalCpus               *ebpf.VariableSpec `ebpf:"total_cpus"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -229,6 +232,7 @@ type bpfMaps struct {
 	Events                              *ebpf.Map `ebpf:"events"`
 	GoContextToSc                       *ebpf.Map `ebpf:"go_context_to_sc"`
 	GoaktActorDoReceive                 *ebpf.Map `ebpf:"goakt_actor_do_receive"`
+	GoaktActorGoidToSpanContext         *ebpf.Map `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.Map `ebpf:"goakt_actor_grain_process"`
 	GoaktActorProcess                   *ebpf.Map `ebpf:"goakt_actor_process"`
@@ -273,6 +277,7 @@ func (m *bpfMaps) Close() error {
 		m.Events,
 		m.GoContextToSc,
 		m.GoaktActorDoReceive,
+		m.GoaktActorGoidToSpanContext,
 		m.GoaktActorGrainDoReceive,
 		m.GoaktActorGrainProcess,
 		m.GoaktActorProcess,
@@ -316,10 +321,11 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfVariables struct {
-	EndAddr   *ebpf.Variable `ebpf:"end_addr"`
-	Hex       *ebpf.Variable `ebpf:"hex"`
-	StartAddr *ebpf.Variable `ebpf:"start_addr"`
-	TotalCpus *ebpf.Variable `ebpf:"total_cpus"`
+	EndAddr                 *ebpf.Variable `ebpf:"end_addr"`
+	Hex                     *ebpf.Variable `ebpf:"hex"`
+	ReceiveContextCtxOffset *ebpf.Variable `ebpf:"receive_context_ctx_offset"`
+	StartAddr               *ebpf.Variable `ebpf:"start_addr"`
+	TotalCpus               *ebpf.Variable `ebpf:"total_cpus"`
 }
 
 // bpfPrograms contains all programs after they have been loaded into the kernel.

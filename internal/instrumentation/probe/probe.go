@@ -20,17 +20,17 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
-
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	"github.com/tochemey/goakt-ebpf/internal/inject"
-	"github.com/tochemey/goakt-ebpf/internal/instrumentation/bpffs"
-	"github.com/tochemey/goakt-ebpf/internal/instrumentation/debug"
-	"github.com/tochemey/goakt-ebpf/internal/instrumentation/probe/sampling"
 	"github.com/tochemey/goakt-ebpf/internal/process"
 	"github.com/tochemey/goakt-ebpf/internal/structfield"
 	"github.com/tochemey/goakt-ebpf/pipeline"
+
+	"github.com/tochemey/goakt-ebpf/internal/instrumentation/bpffs"
+	"github.com/tochemey/goakt-ebpf/internal/instrumentation/debug"
+	"github.com/tochemey/goakt-ebpf/internal/instrumentation/probe/sampling"
 )
 
 // Probe is the instrument used by instrumentation for a Go package to measure

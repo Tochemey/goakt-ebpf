@@ -17,13 +17,13 @@ import (
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
-
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/tochemey/goakt-ebpf/internal/process"
+	"github.com/tochemey/goakt-ebpf/pipeline"
 
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/bpffs"
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/probe"
-	"github.com/tochemey/goakt-ebpf/internal/process"
-	"github.com/tochemey/goakt-ebpf/pipeline"
 )
 
 // Function variables overridden in testing.

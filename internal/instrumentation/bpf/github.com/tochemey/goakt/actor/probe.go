@@ -16,6 +16,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/tochemey/goakt-ebpf/internal/process"
+	"github.com/tochemey/goakt-ebpf/internal/structfield"
+
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/context"
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/kernel"
 	"github.com/tochemey/goakt-ebpf/internal/instrumentation/pdataconv"
@@ -63,16 +66,29 @@ const (
 )
 
 // New returns a new [probe.Probe] for GoAkt actor instrumentation (all targets).
-func New(logger *slog.Logger, version string) probe.Probe {
+// targetPID enables userspace context reading for remote trace propagation when > 0.
+func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 	id := probe.ID{
 		SpanKind:        trace.SpanKindConsumer,
 		InstrumentedPkg: pkg,
 	}
+	receiveContextContextID := structfield.NewID(
+		"github.com/tochemey/goakt/v4",
+		"github.com/tochemey/goakt/v4/actor",
+		"ReceiveContext",
+		"ctx",
+	)
+	processFn := makeProcessFn(logger, targetPID)
 	return &probe.SpanProducer[bpfObjects, event]{
 		Base: probe.Base[bpfObjects, event]{
 			ID:     id,
 			Logger: logger,
-			Consts: []probe.Const{},
+			Consts: []probe.Const{
+				probe.StructFieldConst{
+					Key: "receive_context_ctx_offset",
+					ID:  receiveContextContextID,
+				},
+			},
 			Uprobes: []*probe.Uprobe{
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).doReceive",
@@ -259,18 +275,26 @@ func New(logger *slog.Logger, version string) probe.Probe {
 	}
 }
 
+// makeProcessFn returns a processFn that uses userspace context reading when targetPID > 0.
+func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanSlice {
+	return func(e *event) ptrace.SpanSlice {
+		return processEvent(e, logger, targetPID)
+	}
+}
+
 // event represents an instrumentation event (layout must match C struct goakt_actor_span_t).
 type event struct {
 	EventType           uint8
 	HandledSuccessfully uint8
 	_                   [6]byte // padding for alignment
 	context.BaseSpanProperties
+	ContextPtr uint64 // context.Context data pointer for userspace trace extraction (0 when N/A)
 }
 
 // baseAttrs is shared to avoid per-span allocation.
 var baseAttrs = []attribute.KeyValue{attribute.String("messaging.system", "goakt")}
 
-func processFn(e *event) ptrace.SpanSlice {
+func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice {
 	spans := ptrace.NewSpanSlice()
 	span := spans.AppendEmpty()
 
@@ -282,10 +306,13 @@ func processFn(e *event) ptrace.SpanSlice {
 
 	if e.ParentSpanContext.SpanID.IsValid() {
 		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
+	} else if targetPID > 0 && e.ContextPtr != 0 {
+		if psc := process.ExtractSpanContextFromContext(targetPID, e.ContextPtr, logger); psc != nil {
+			span.SetParentSpanID(pcommon.SpanID(psc.SpanID()))
+			span.SetTraceID(pcommon.TraceID(psc.TraceID()))
+		}
 	}
 
-	// Future: add actor.sender.id, actor.receiver.id, actor.system.name via StructFieldConst
-	// (requires DWARF offsets from ReceiveContext.sender, ReceiveContext.self, PID.path, path.system, path.name).
 	ts := eventTimestamps{
 		sent:     kernel.BootOffsetToTimestamp(e.StartTime),
 		received: kernel.BootOffsetToTimestamp(e.StartTime),
