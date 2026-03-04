@@ -51,6 +51,7 @@ generate:
     COPY --dir . .
     ARG REPODIR=/app
     ENV BPF2GO_CFLAGS="-I${REPODIR}/internal/include/libbpf -I${REPODIR}/internal/include"
+    ENV GOFLAGS="-mod=mod"
     RUN go generate ./...
     SAVE ARTIFACT /app/internal/instrumentation/bpf AS LOCAL internal/instrumentation/bpf
 

@@ -76,7 +76,7 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 		"github.com/tochemey/goakt/v4",
 		"github.com/tochemey/goakt/v4/actor",
 		"ReceiveContext",
-		"Context",
+		"ctx",
 	)
 	processFn := makeProcessFn(logger, targetPID)
 	return &probe.SpanProducer[bpfObjects, event]{
