@@ -7,7 +7,7 @@
 # -----------------------------------------------------------------------------
 # Stage 0: Base (Go + eBPF build tools for generate/test)
 # -----------------------------------------------------------------------------
-FROM golang:1.26-bookworm AS base
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS base
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang llvm linux-headers-generic libbpf-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -16,7 +16,7 @@ RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.20.0
 # -----------------------------------------------------------------------------
 # Stage 1: Build
 # -----------------------------------------------------------------------------
-FROM base AS builder
+FROM --platform=$BUILDPLATFORM base AS builder
 
 WORKDIR /build
 
@@ -25,13 +25,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
+ARG TARGETOS=linux
+ARG TARGETARCH
 ARG REPODIR=/build
 ENV BPF2GO_CFLAGS="-I${REPODIR}/internal/include/libbpf -I${REPODIR}/internal/include"
 ENV GOFLAGS="-mod=mod"
 ENV CGO_ENABLED=0
 
 RUN go generate ./internal/instrumentation/bpf/github.com/tochemey/goakt/actor/... \
-    && go build -ldflags="-s -w" -o goakt-ebpf ./cmd/cli/...
+    && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o goakt-ebpf ./cmd/cli/...
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (minimal)
