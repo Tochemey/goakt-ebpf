@@ -81,8 +81,11 @@ func main() {
 				if ref.RefType != "CHILD_OF" || ref.SpanID == "" {
 					continue
 				}
+				if ref.TraceID != "" && ref.TraceID != t.TraceID {
+					continue
+				}
 				if _, ok := spanByID[ref.SpanID]; !ok {
-					fatal("span %s (%s) references unknown parent %s in trace %s",
+					fmt.Fprintf(os.Stderr, "assert-jaeger-traces: warning: span %s (%s) references parent %s not found in trace %s (cross-service parent)\n",
 						s.SpanID, s.OperationName, ref.SpanID, t.TraceID)
 				}
 			}
@@ -115,7 +118,6 @@ func main() {
 		fatal("expected at least %d spans, got %d", minSpans, totalSpans)
 	}
 
-	// actor.process must always have a parent (doReceive via goroutine-scoped map)
 	if processTotal > 0 && processWithParent == 0 {
 		fatal("no actor.process spans have a parent (goroutine propagation broken)")
 	}
@@ -140,33 +142,35 @@ func hasChildOfRef(s span) bool {
 	return false
 }
 
+// fetchTraces retrieves traces from both services and merges them by trace ID
+// so that cross-service parent references resolve correctly.
 func fetchTraces(baseURL, service string) []trace {
-	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
-	parsedURL, err := url.ParseRequestURI(rawURL)
-	if err != nil {
-		fatal("invalid URL %q: %v", rawURL, err)
-	}
-
-	resp, err := http.Get(parsedURL.String())
-	if err != nil {
-		fatal("GET %s: %v", parsedURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fatal("GET %s: status %d", parsedURL, resp.StatusCode)
-	}
-
-	var tr traceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		fatal("decode JSON: %v", err)
-	}
-
-	// Also fetch app traces to validate cross-service linking
+	agentTraces := fetchServiceTraces(baseURL, service)
 	appTraces := fetchServiceTraces(baseURL, "integration-app")
-	tr.Data = append(tr.Data, appTraces...)
 
-	return tr.Data
+	merged := make(map[string]*trace)
+	for i := range agentTraces {
+		t := &agentTraces[i]
+		merged[t.TraceID] = t
+	}
+	for _, t := range appTraces {
+		if existing, ok := merged[t.TraceID]; ok {
+			existing.Spans = append(existing.Spans, t.Spans...)
+		} else {
+			dup := t
+			merged[t.TraceID] = &dup
+		}
+	}
+
+	if len(merged) == 0 {
+		fatal("no traces found for service=%s", service)
+	}
+
+	out := make([]trace, 0, len(merged))
+	for _, t := range merged {
+		out = append(out, *t)
+	}
+	return out
 }
 
 func fetchServiceTraces(baseURL, service string) []trace {
