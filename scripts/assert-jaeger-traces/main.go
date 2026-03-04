@@ -37,6 +37,7 @@ type reference struct {
 	SpanID  string `json:"spanID"`
 }
 
+// nolint:gocyclo
 func main() {
 	baseURL := envOr("JAEGER_QUERY_URL", "http://localhost:16686")
 	baseURL = strings.TrimSuffix(baseURL, "/")
@@ -52,19 +53,25 @@ func main() {
 		"actor.process":   false,
 	}
 
+	appSpanNames := map[string]bool{"send-tell": false, "send-ask": false}
+
 	var (
-		totalSpans        int
-		processWithParent int
-		processTotal      int
-		receiveWithParent int
-		receiveTotal      int
-		multiSpanTraces   int
+		totalSpans           int
+		processWithParent    int
+		processTotal         int
+		receiveWithParent    int
+		receiveTotal         int
+		receiveWithAppParent int
+		multiSpanTraces      int
 	)
 
 	for _, t := range traces {
 		spanByID := make(map[string]span, len(t.Spans))
 		for _, s := range t.Spans {
 			spanByID[s.SpanID] = s
+			if s.OperationName == "send-tell" || s.OperationName == "send-ask" {
+				appSpanNames[s.OperationName] = true
+			}
 		}
 
 		totalSpans += len(t.Spans)
@@ -103,6 +110,18 @@ func main() {
 				if hasParent {
 					receiveWithParent++
 				}
+				if hasParent {
+					for _, ref := range s.References {
+						if ref.RefType != "CHILD_OF" || ref.SpanID == "" {
+							continue
+						}
+						if parent, ok := spanByID[ref.SpanID]; ok &&
+							(parent.OperationName == "send-tell" || parent.OperationName == "send-ask") {
+							receiveWithAppParent++
+							break
+						}
+					}
+				}
 			}
 		}
 	}
@@ -126,11 +145,26 @@ func main() {
 		fatal("no traces have more than 1 span (context propagation not working)")
 	}
 
+	appSpanFound := false
+	for _, found := range appSpanNames {
+		if found {
+			appSpanFound = true
+			break
+		}
+	}
+	if !appSpanFound {
+		fatal("no app spans (send-tell/send-ask) found in traces")
+	}
+
+	if receiveTotal > 0 && receiveWithAppParent == 0 {
+		fatal("no actor.doReceive spans have app span (send-tell/send-ask) as parent — context propagation (Layout C) may be broken")
+	}
+
 	fmt.Printf("assert-jaeger-traces: OK\n")
 	fmt.Printf("  traces: %d (%d with multiple spans)\n", len(traces), multiSpanTraces)
 	fmt.Printf("  total spans: %d\n", totalSpans)
 	fmt.Printf("  actor.process: %d/%d with parent\n", processWithParent, processTotal)
-	fmt.Printf("  actor.doReceive: %d/%d with parent\n", receiveWithParent, receiveTotal)
+	fmt.Printf("  actor.doReceive: %d/%d with parent (%d with app span parent)\n", receiveWithParent, receiveTotal, receiveWithAppParent)
 }
 
 func hasChildOfRef(s span) bool {

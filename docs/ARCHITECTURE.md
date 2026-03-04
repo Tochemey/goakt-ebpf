@@ -116,28 +116,78 @@ This links `actor.process` as a child of `actor.doReceive` since they run on the
 
 When BPF-side lookup finds no parent and `context_ptr` is non-zero, userspace reads the target process memory via `process_vm_readv(2)` to extract an OTEL span context from the Go `context.Context` chain.
 
-The reader speculatively walks the chain, treating each node as a `valueCtx` (48 bytes). For each node it reads `val.data` and checks whether the pointed-to value looks like a `nonRecordingSpan`:
+The reader speculatively walks the chain, treating each node as a `valueCtx` (48 bytes). For each node it reads 256 bytes from `val.data` and probes four empirically validated span struct layouts in order of likelihood:
 
 ```
 valueCtx (48 bytes):
   [0:8]   Context.itab     [8:16]  Context.data  -> parent context
   [16:24] key.type         [24:32] key.data
-  [32:40] val.type         [40:48] val.data      -> nonRecordingSpan ptr
-
-nonRecordingSpan:
-  [0:16]  noopSpan (embedded.Span interface, always nil = zeros)
-  [16:32] SpanContext.traceID  [16]byte
-  [32:40] SpanContext.spanID   [8]byte
-  [40]    SpanContext.traceFlags byte
+  [32:40] val.type         [40:48] val.data      -> concrete span struct ptr
 ```
 
-Validation: first 16 bytes (noopSpan) must be zero; both TraceID and SpanID must be non-zero. Non-valueCtx nodes produce either read failures or invalid data, which the validation catches.
+#### Layout A — `trace.nonRecordingSpan` (go.opentelemetry.io/otel/trace)
 
-This connects goakt-ebpf spans to application-level OTEL spans and to remote trace context injected by GoAkt's `ContextPropagator`.
+```
+offset  0  size 16   noopSpan (embedded.Span interface, always zero)
+offset 16  size 64   sc trace.SpanContext
+  [16:32] TraceID [16]byte   [32:40] SpanID [8]byte   [40] TraceFlags
+```
+
+**When it appears:** `trace.ContextWithSpanContext(ctx, sc)` — W3C/B3 remote propagation stores a `nonRecordingSpan` in context before starting the local child span.  
+**Heuristic:** bytes `[0:16]` == zero; bytes `[16:24]` non-zero (start of TraceID); valid sampled TraceID/SpanID at offsets 16/32.
+
+#### Layout B — `sdk/trace.nonRecordingSpan` (go.opentelemetry.io/otel/sdk/trace, not-sampled)
+
+```
+offset  0  size 16   embedded.Span (always zero)
+offset 16  size  8   tracer *tracer (non-zero pointer)
+offset 24  size 64   sc trace.SpanContext
+  [24:40] TraceID [16]byte   [40:48] SpanID [8]byte   [48] TraceFlags
+```
+
+**When it appears:** `tracer.Start(ctx, "name")` with `NeverSample()` TracerProvider.  
+**Heuristic:** bytes `[0:16]` == zero; bytes `[16:24]` non-zero pointer (tracer); valid sampled TraceID/SpanID at offsets 24/40. Since not-sampled spans have `TraceFlags == 0`, they are filtered out by the sampled guard and do not produce a parent link.
+
+#### Layout C — `*sdk/trace.recordingSpan` (go.opentelemetry.io/otel/sdk/trace, sampled)
+
+```
+offset   0  size  16   embedded.Span (always zero)
+offset  16  size   8   mu sync.Mutex (zero when unlocked)
+offset  24  size  64   parent trace.SpanContext  <- caller's context (NOT the current span)
+  ...
+offset 192  size  64   spanContext trace.SpanContext  <- current span's own context
+  [192:208] TraceID [16]byte   [208:216] SpanID [8]byte   [216] TraceFlags
+```
+
+**When it appears:** `tracer.Start(ctx, "name")` with a sampled `TracerProvider` — this is what `otelhttp`, `otelgrpc`, and all standard instrumentation libraries create. **This is the most common layout for HTTP and gRPC parent spans.**  
+**Heuristic:** bytes `[0:24]` == zero (embedded + unlocked mutex); valid sampled TraceID/SpanID at offsets 192/208.  
+**Key insight:** `parent` at offset 24 holds the *caller's* span context (used when building the trace tree on export). `spanContext` at offset 192 is the *current* span's own ID, which goakt-ebpf needs as the parent for actor spans. Reading at the wrong offset (16 or 24) yields the mutex or partial parent TraceID — not the current span.
+
+#### Layout D — `*auto/sdk.span` (go.opentelemetry.io/auto/sdk) — Not Supported
+
+```
+offset  0  size 80   noop.Span (embedded.Span[16] + sc SpanContext[64], all zero in user-space)
+offset 80  size 64   spanContext trace.SpanContext  <- zero-initialized; never populated in user-space
+```
+
+**When it appears:** `tracer.Start(ctx, "name")` with `autosdk.TracerProvider()`.  
+**Limitation:** The `spanContext` field is zero-initialized at span creation and never populated in user-space — the eBPF instrumentation layer fills it via kernel probes. The userspace context reader cannot extract parent context from Auto SDK spans. **eBPF-level probes on `tracer.Start` are required** for parent-child correlation when using the Auto SDK.
+
+#### Probe Order and Sampled Guard
+
+Layouts are probed in order C → A → B. Only span contexts with `TraceFlags & FlagsSampled != 0` are returned. This ensures:
+- Not-sampled spans (Layout B) never produce a parent link.
+- Layout C is tried first because it is the most common source of HTTP/gRPC parent spans and is unambiguously identified by `bytes[16:24] == 0` (unlocked mutex) with `TraceID` at offset 192.
+- Layouts A and B are tried when `bytes[16:24] != 0`, using TraceID position to discriminate.
+
+Set `GOAKT_EBPF_DEBUG_CONTEXT_READER=1` to enable verbose per-node logging that reports which layout matched and how many nodes were visited.
+
+This connects goakt-ebpf spans to application-level OTEL spans (HTTP, gRPC, manual, or remote) and to remote trace context injected by GoAkt's `ContextPropagator`.
 
 **Limitations:**
 - `valueCtx` layout is stable since Go 1.7 but not a public API.
-- `nonRecordingSpan` layout depends on the OTEL SDK version.
+- Span struct layouts are empirically validated against `go.opentelemetry.io/otel v1.41.0` and `go.opentelemetry.io/auto/sdk v1.2.1`. Offsets are recorded in `internal/inject/offset_results.json`.
+- Auto SDK parent extraction requires eBPF-level probes (not supported via the userspace reader).
 - Requires `CAP_SYS_PTRACE` (already required for uprobes).
 
 ### Context Extraction by Method

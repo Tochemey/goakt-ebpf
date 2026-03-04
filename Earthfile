@@ -85,4 +85,4 @@ docker-image:
     COPY (+build/goakt-ebpf) /usr/local/bin/goakt-ebpf
     USER appuser
     ENTRYPOINT ["/usr/local/bin/goakt-ebpf"]
-    SAVE IMAGE goakt-ebpf:dev
+    SAVE IMAGE ghcr.io/tochemey/goakt-ebpf:dev
