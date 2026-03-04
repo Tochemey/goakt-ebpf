@@ -27,11 +27,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get version
+      - name: Get version and image metadata
         id: version
         run: |
           TAG="${{ github.event.release.tag_name }}"
           echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -39,6 +40,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+          tags: ghcr.io/${{ steps.version.outputs.repo }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
