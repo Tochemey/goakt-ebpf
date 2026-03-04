@@ -73,7 +73,7 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 		InstrumentedPkg: pkg,
 	}
 	receiveContextContextID := structfield.NewID(
-		"github.com/tochemey/goakt",
+		"github.com/tochemey/goakt/v4",
 		"github.com/tochemey/goakt/v4/actor",
 		"ReceiveContext",
 		"Context",
