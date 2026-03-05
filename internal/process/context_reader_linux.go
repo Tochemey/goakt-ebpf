@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	valueCtxSize  = 48
-	parentDataOff = 8
-	valDataOff    = 40
-	spanReadSize  = 256
+	parentDataOff  = 8
+	valDataOff     = 40
+	parentReadSize = 16
+	ptrReadSize    = 8
+	spanReadSize   = 256
 
 	layoutATraceIDOff = 16
 	layoutASpanIDOff  = 32
@@ -48,8 +49,10 @@ func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logg
 	}
 
 	nodePtr := ctxDataPtr
-	nodeBuf := make([]byte, valueCtxSize)
-	spanBuf := make([]byte, spanReadSize)
+	// Keep buffers on stack to avoid per-event heap allocations and GC churn.
+	var parentBuf [parentReadSize]byte
+	var valBuf [ptrReadSize]byte
+	var spanBuf [spanReadSize]byte
 
 	for depth := 0; depth < maxChainDepth; depth++ {
 		if nodePtr == 0 {
@@ -61,8 +64,8 @@ func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logg
 			break
 		}
 
-		n, err := readRemote(pid, nodePtr, nodeBuf)
-		if err != nil || n < valueCtxSize {
+		n, err := readRemote(pid, nodePtr, parentBuf[:])
+		if err != nil || n < parentReadSize {
 			if debugContextReader {
 				logger.Debug("context walk stopped: remote read failed",
 					"nodes_visited", depth,
@@ -72,9 +75,19 @@ func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logg
 			break
 		}
 
-		valData := binary.LittleEndian.Uint64(nodeBuf[valDataOff:])
+		parentPtr := binary.LittleEndian.Uint64(parentBuf[parentDataOff:])
+
+		// valueCtx keeps the value pointer at +40. Read it independently so
+		// traversal can continue even when the concrete context node is not
+		// valueCtx-sized.
+		valData := uint64(0)
+		n, err = readRemote(pid, nodePtr+valDataOff, valBuf[:])
+		if err == nil && n >= ptrReadSize {
+			valData = binary.LittleEndian.Uint64(valBuf[:])
+		}
+
 		if valData != 0 {
-			sc := tryReadSpanContext(pid, valData, spanBuf, logger)
+			sc := tryReadSpanContext(pid, valData, spanBuf[:], logger)
 			if sc != nil {
 				if debugContextReader {
 					logger.Debug("context walk complete: parent span found",
@@ -87,7 +100,7 @@ func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logg
 			}
 		}
 
-		nodePtr = binary.LittleEndian.Uint64(nodeBuf[parentDataOff:])
+		nodePtr = parentPtr
 	}
 
 	return nil
@@ -151,9 +164,6 @@ func extractSpanContext(buf []byte, traceIDOff, spanIDOff, flagsOff int) *trace.
 	}
 
 	flags := trace.TraceFlags(buf[flagsOff])
-	if flags&trace.FlagsSampled == 0 {
-		return nil
-	}
 
 	var traceID trace.TraceID
 	copy(traceID[:], buf[traceIDOff:traceIDOff+traceIDSize])

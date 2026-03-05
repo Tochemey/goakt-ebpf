@@ -294,6 +294,8 @@ type event struct {
 // baseAttrs is shared to avoid per-span allocation.
 var baseAttrs = []attribute.KeyValue{attribute.String("messaging.system", "goakt")}
 
+var extractParentSpanFromContext = process.ExtractSpanContextFromContext
+
 func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice {
 	spans := ptrace.NewSpanSlice()
 	span := spans.AppendEmpty()
@@ -307,7 +309,7 @@ func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice
 	if e.ParentSpanContext.SpanID.IsValid() {
 		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
 	} else if targetPID > 0 && e.ContextPtr != 0 {
-		if psc := process.ExtractSpanContextFromContext(targetPID, e.ContextPtr, logger); psc != nil {
+		if psc := extractParentSpanFromContext(targetPID, e.ContextPtr, logger); psc != nil {
 			span.SetParentSpanID(pcommon.SpanID(psc.SpanID()))
 			span.SetTraceID(pcommon.TraceID(psc.TraceID()))
 		}
