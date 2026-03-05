@@ -141,8 +141,10 @@ The app sends Tell and Ask messages every 5 seconds (so the agent, which attache
 The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger:
 
 - **Expected span names:** `actor.doReceive`, `actor.process` (from Tell/Ask and message handling; `actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
+- **App span names:** At least one of `send-tell` or `send-ask` (manual spans created by the integration app)
 - **Minimum span count:** ≥ 4 spans across all traces
 - **Parent propagation:** Spans with `CHILD_OF` references have their parent span present in the same trace
+- **Layout C assertion:** At least one `actor.doReceive` span must have an app span (`send-tell` or `send-ask`) as its parent — validates that the userspace context reader correctly extracts parent span context from `*sdk/trace.recordingSpan`
 
 Set `JAEGER_QUERY_URL` (default `http://localhost:16686`) and `JAEGER_SERVICE` (default `goakt-ebpf`) to override.
 

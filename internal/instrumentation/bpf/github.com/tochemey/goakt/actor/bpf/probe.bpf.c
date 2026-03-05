@@ -302,7 +302,7 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_goid_to_span_context SEC(".maps");
 
-// get_parent_span_context_goid_first tries goid map first, then go_context chain.
+// get_parent_span_context_goid_first prefers go_context chain, then falls back to goid map.
 // Used as get_parent_span_context_fn so process() and grainPID.process() inherit.
 struct goid_parent_handle {
 	struct pt_regs *ctx;
@@ -311,18 +311,17 @@ struct goid_parent_handle {
 
 static long get_parent_span_context_goid_first(void *handle, struct span_context *psc) {
 	struct goid_parent_handle *h = (struct goid_parent_handle *)handle;
-	void *goid = (void *)GOROUTINE(h->ctx);
+	struct span_context *from_ctx = get_parent_span_context(h->go_context);
+	if (from_ctx != NULL) {
+		*psc = *from_ctx;
+		return 0;
+	}
 
+	void *goid = (void *)GOROUTINE(h->ctx);
 	struct span_context *from_goid =
 		bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &goid);
 	if (from_goid != NULL) {
 		*psc = *from_goid;
-		return 0;
-	}
-
-	struct span_context *from_ctx = get_parent_span_context(h->go_context);
-	if (from_ctx != NULL) {
-		*psc = *from_ctx;
 		return 0;
 	}
 	return -1;

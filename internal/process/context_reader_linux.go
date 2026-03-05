@@ -4,37 +4,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Userspace context reader for remote trace propagation.
-//
-// Reads Go context.Context chain from target process memory via process_vm_readv
-// to extract OpenTelemetry span context (trace_id, span_id) from remote messages.
-//
-// Memory layout (Go 64-bit):
-//
-//	context.valueCtx {
-//	    Context  context.Context  // interface: {itab, data} = 16 bytes
-//	    key      any              // interface: {type, data} = 16 bytes
-//	    val      any              // interface: {type, data} = 16 bytes
-//	}                            // total: 48 bytes
-//
-// OTEL stores a nonRecordingSpan in the context via ContextWithSpan:
-//
-//	trace.nonRecordingSpan {
-//	    noopSpan {
-//	        embedded.Span  // interface: {itab, data} = 16 bytes (nil when constructed)
-//	    }
-//	    sc SpanContext {
-//	        traceID    [16]byte  // offset 16 from nonRecordingSpan start
-//	        spanID     [8]byte   // offset 32
-//	        traceFlags byte      // offset 40
-//	        ...                  // traceState, remote (not needed)
-//	    }
-//	}
-
 package process
 
 import (
 	"encoding/binary"
 	"log/slog"
+	"os"
 	"unsafe"
 
 	"go.opentelemetry.io/otel/trace"
@@ -42,98 +17,165 @@ import (
 )
 
 const (
-	ifaceSize     = 16 // size of a Go interface value (type/itab + data pointer)
-	valueCtxSize  = 48 // parent(16) + key(16) + val(16)
-	parentDataOff = 8  // offset of parent.data within any context struct (all embed Context first)
-	valDataOff    = 40 // offset of val.data within valueCtx
+	parentDataOff  = 8
+	valDataOff     = 40
+	parentReadSize = 16
+	ptrReadSize    = 8
+	spanReadSize   = 256
 
-	// nonRecordingSpan layout: noopSpan(16) + SpanContext fields
-	nrsNoopSpanSize = 16 // size of embedded noopSpan (nil interface)
-	scTraceIDOff    = nrsNoopSpanSize
-	scTraceIDSize   = 16
-	scSpanIDOff     = scTraceIDOff + scTraceIDSize // 32
-	scSpanIDSize    = 8
-	scFlagsOff      = scSpanIDOff + scSpanIDSize // 40
-	nrsReadSize     = scFlagsOff + 1             // 41 bytes total from nonRecordingSpan start
+	layoutATraceIDOff = 16
+	layoutASpanIDOff  = 32
+	layoutAFlagsOff   = 40
 
+	layoutBTracerPtrOff = 16
+	layoutBTraceIDOff   = 24
+	layoutBSpanIDOff    = 40
+	layoutBFlagsOff     = 48
+
+	layoutCTraceIDOff = 192
+	layoutCSpanIDOff  = 208
+	layoutCFlagsOff   = 216
+
+	traceIDSize   = 16
+	spanIDSize    = 8
 	maxChainDepth = 32
 )
 
-// ExtractSpanContextFromContext reads the target process memory at ctxDataPtr,
-// walks the Go context.Context chain (speculatively treating each node as a
-// valueCtx), and returns the first valid OTEL span context found.
-//
-// ctxDataPtr is the data pointer of a context.Context interface captured by
-// the BPF probe. It points to the concrete context implementation in the
-// target process.
-//
-// Returns nil when extraction fails or no valid span context is found.
+var debugContextReader = os.Getenv("GOAKT_EBPF_DEBUG_CONTEXT_READER") == "1"
+
 func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logger) *trace.SpanContext {
 	if pid <= 0 || ctxDataPtr == 0 {
 		return nil
 	}
 
 	nodePtr := ctxDataPtr
-	nodeBuf := make([]byte, valueCtxSize)
-	nrsBuf := make([]byte, nrsReadSize)
+	// Keep buffers on stack to avoid per-event heap allocations and GC churn.
+	var parentBuf [parentReadSize]byte
+	var valBuf [ptrReadSize]byte
+	var spanBuf [spanReadSize]byte
 
 	for depth := 0; depth < maxChainDepth; depth++ {
 		if nodePtr == 0 {
+			if debugContextReader {
+				logger.Debug("context walk exhausted with no parent span",
+					"nodes_visited", depth,
+				)
+			}
 			break
 		}
 
-		// Read 48 bytes from the current context node, treating it as a valueCtx.
-		// For non-valueCtx types (cancelCtx, timerCtx) the bytes at valDataOff
-		// will be unrelated data; the span context validation catches this.
-		n, err := readRemote(pid, nodePtr, nodeBuf)
-		if err != nil || n < valueCtxSize {
+		n, err := readRemote(pid, nodePtr, parentBuf[:])
+		if err != nil || n < parentReadSize {
+			if debugContextReader {
+				logger.Debug("context walk stopped: remote read failed",
+					"nodes_visited", depth,
+					"error", err,
+				)
+			}
 			break
 		}
 
-		valData := binary.LittleEndian.Uint64(nodeBuf[valDataOff:])
+		parentPtr := binary.LittleEndian.Uint64(parentBuf[parentDataOff:])
+
+		// valueCtx keeps the value pointer at +40. Read it independently so
+		// traversal can continue even when the concrete context node is not
+		// valueCtx-sized.
+		valData := uint64(0)
+		n, err = readRemote(pid, nodePtr+valDataOff, valBuf[:])
+		if err == nil && n >= ptrReadSize {
+			valData = binary.LittleEndian.Uint64(valBuf[:])
+		}
+
 		if valData != 0 {
-			sc := tryReadSpanContext(pid, valData, nrsBuf, logger)
+			sc := tryReadSpanContext(pid, valData, spanBuf[:], logger)
 			if sc != nil {
+				if debugContextReader {
+					logger.Debug("context walk complete: parent span found",
+						"nodes_visited", depth+1,
+						"trace_id", sc.TraceID(),
+						"span_id", sc.SpanID(),
+					)
+				}
 				return sc
 			}
 		}
 
-		// Follow parent: data word of the Context interface (offset 8).
-		nodePtr = binary.LittleEndian.Uint64(nodeBuf[parentDataOff:])
+		nodePtr = parentPtr
 	}
 
 	return nil
 }
 
-// tryReadSpanContext reads nrsReadSize bytes from addr in the target process,
-// interprets the data as a nonRecordingSpan, and validates the span context.
 func tryReadSpanContext(pid int, addr uint64, buf []byte, logger *slog.Logger) *trace.SpanContext {
-	n, err := readRemote(pid, addr, buf[:nrsReadSize])
-	if err != nil || n < nrsReadSize {
+	n, err := readRemote(pid, addr, buf[:spanReadSize])
+	if err != nil || n < spanReadSize {
 		return nil
 	}
 
-	// Heuristic: noopSpan embedded interface should be nil ({0, 0}).
-	// This reduces false positives when the node is not a valueCtx.
-	for i := 0; i < nrsNoopSpanSize; i++ {
-		if buf[i] != 0 {
-			return nil
+	if !isZero(buf[0:16]) {
+		return nil
+	}
+
+	if isZero(buf[16:24]) {
+		if sc := extractSpanContext(buf, layoutCTraceIDOff, layoutCSpanIDOff, layoutCFlagsOff); sc != nil {
+			if debugContextReader {
+				logger.Debug("matched span layout C (sdk/trace.recordingSpan)",
+					"trace_id", sc.TraceID(),
+					"span_id", sc.SpanID(),
+					"addr", addr,
+				)
+			}
+			return sc
 		}
 	}
 
+	if !isZero(buf[16:24]) {
+		if sc := extractSpanContext(buf, layoutATraceIDOff, layoutASpanIDOff, layoutAFlagsOff); sc != nil {
+			if debugContextReader {
+				logger.Debug("matched span layout A (trace.nonRecordingSpan/API)",
+					"trace_id", sc.TraceID(),
+					"span_id", sc.SpanID(),
+					"addr", addr,
+				)
+			}
+			return sc
+		}
+	}
+
+	if binary.LittleEndian.Uint64(buf[layoutBTracerPtrOff:]) != 0 {
+		if sc := extractSpanContext(buf, layoutBTraceIDOff, layoutBSpanIDOff, layoutBFlagsOff); sc != nil {
+			if debugContextReader {
+				logger.Debug("matched span layout B (sdk/trace.nonRecordingSpan)",
+					"trace_id", sc.TraceID(),
+					"span_id", sc.SpanID(),
+					"addr", addr,
+				)
+			}
+			return sc
+		}
+	}
+
+	return nil
+}
+
+func extractSpanContext(buf []byte, traceIDOff, spanIDOff, flagsOff int) *trace.SpanContext {
+	if flagsOff+1 > len(buf) || spanIDOff+spanIDSize > len(buf) || traceIDOff+traceIDSize > len(buf) {
+		return nil
+	}
+
+	flags := trace.TraceFlags(buf[flagsOff])
+
 	var traceID trace.TraceID
-	copy(traceID[:], buf[scTraceIDOff:scTraceIDOff+scTraceIDSize])
+	copy(traceID[:], buf[traceIDOff:traceIDOff+traceIDSize])
 	if !traceID.IsValid() {
 		return nil
 	}
 
 	var spanID trace.SpanID
-	copy(spanID[:], buf[scSpanIDOff:scSpanIDOff+scSpanIDSize])
+	copy(spanID[:], buf[spanIDOff:spanIDOff+spanIDSize])
 	if !spanID.IsValid() {
 		return nil
 	}
-
-	flags := trace.TraceFlags(buf[scFlagsOff])
 
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    traceID,
@@ -141,15 +183,18 @@ func tryReadSpanContext(pid int, addr uint64, buf []byte, logger *slog.Logger) *
 		TraceFlags: flags,
 		Remote:     true,
 	})
-	logger.Debug("extracted remote span context",
-		"trace_id", traceID,
-		"span_id", spanID,
-		"flags", flags,
-	)
 	return &sc
 }
 
-// readRemote reads len(buf) bytes from addr in the target process.
+func isZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func readRemote(pid int, addr uint64, buf []byte) (int, error) {
 	remote := []unix.RemoteIovec{
 		{Base: uintptr(addr), Len: len(buf)},

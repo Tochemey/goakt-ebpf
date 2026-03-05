@@ -8717,6 +8717,87 @@
             ]
           }
         ]
+      },
+      {
+        "package": "go.opentelemetry.io/otel/trace",
+        "structs": [
+          {
+            "struct": "nonRecordingSpan",
+            "fields": [
+              {
+                "field": "sc",
+                "offsets": [
+                  {
+                    "offset": 16,
+                    "versions": ["1.41.0"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "module": "go.opentelemetry.io/auto/sdk",
+    "packages": [
+      {
+        "package": "go.opentelemetry.io/auto/sdk",
+        "structs": [
+          {
+            "struct": "span",
+            "fields": [
+              {
+                "field": "spanContext",
+                "offsets": [
+                  {
+                    "offset": 80,
+                    "versions": ["1.2.1"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "module": "go.opentelemetry.io/otel/sdk",
+    "packages": [
+      {
+        "package": "go.opentelemetry.io/otel/sdk/trace",
+        "structs": [
+          {
+            "struct": "nonRecordingSpan",
+            "fields": [
+              {
+                "field": "sc",
+                "offsets": [
+                  {
+                    "offset": 24,
+                    "versions": ["1.41.0"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "struct": "recordingSpan",
+            "fields": [
+              {
+                "field": "spanContext",
+                "offsets": [
+                  {
+                    "offset": 192,
+                    "versions": ["1.41.0"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }

@@ -8,6 +8,8 @@
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main)](https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l)](https://codecov.io/gh/Tochemey/goakt-ebpf)
 
+> **⚠️ Notice:** Development of this implementation has been **halted** due to assessment of the internals of OpenTelemetry and possible breaking changes in OpenTelemetry.
+
 eBPF tracing agent for [GoAkt](https://github.com/tochemey/goakt) — zero-instrumentation tracing of actor message flow, remoting, and grains.
 
 ## 📖 Overview
@@ -177,6 +179,40 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 ))
 ```
 
+## 🧵 Parent Span Correlation
+
+goakt-ebpf reads the Go `context.Context` passed to actor operations at the uprobe site and extracts an OpenTelemetry span context from it. When found, actor spans become children of the application span — connecting HTTP, gRPC, or any other entry-point trace to your actor work.
+
+### Supported SDK and Span Types
+
+| SDK / Span type                                       | Layout | Supported                                                                       |
+|-------------------------------------------------------|--------|---------------------------------------------------------------------------------|
+| `go.opentelemetry.io/otel/trace.nonRecordingSpan`     | A      | Yes — remote-propagated contexts (W3C/B3)                                       |
+| `go.opentelemetry.io/otel/sdk/trace.recordingSpan`    | C      | Yes — sampled HTTP/gRPC/manual spans (most common)                              |
+| `go.opentelemetry.io/otel/sdk/trace.nonRecordingSpan` | B      | Filtered — not-sampled spans produce no parent link                             |
+| `go.opentelemetry.io/auto/sdk.span`                   | D      | Not supported — `spanContext` is zero in user-space; eBPF-level probes required |
+
+### Requirements for Parent-Child Correlation
+
+**Standard OTEL SDK** (`go.opentelemetry.io/otel/sdk`):
+
+1. Initialize a `TracerProvider` with a sampled exporter (`sdktrace.NewTracerProvider(...)`).
+2. Set it globally: `otel.SetTracerProvider(tp)`.
+3. Instrument entry points (HTTP handlers, gRPC interceptors, etc.) so spans are created and stored in `context.Context`.
+4. **Propagate that context into actor calls**: `goakt.Ask(ctx, pid, msg)`, `goakt.Tell(ctx, pid, msg)`, `actorSystem.Spawn(ctx, ...)`, etc.
+
+**Auto SDK** (`go.opentelemetry.io/auto/sdk`):
+
+The userspace context reader cannot extract parent context from Auto SDK spans because `spanContext` is zero-initialized in user-space. eBPF-level probes on `tracer.Start` are required (not yet implemented). Actor spans will appear as root spans when the application uses the Auto SDK.
+
+### Debugging Context Propagation
+
+Set `GOAKT_EBPF_DEBUG_CONTEXT_READER=1` to enable verbose logging that shows which span layout was matched and how many context chain nodes were visited:
+
+```bash
+GOAKT_EBPF_DEBUG_CONTEXT_READER=1 ./goakt-ebpf -pid 1
+```
+
 ## 🎯 What You'll See in Traces
 
 goakt-ebpf gives you visibility into your GoAkt application without changing a single line of code. In Jaeger, Tempo, or any OTLP backend, you'll see spans for:
@@ -202,13 +238,14 @@ The agent attaches to your GoAkt process, captures actor activity as it happens,
 
 ## 🔍 Troubleshooting
 
-| Issue                                    | Cause                                                     | Fix                                                                   |
-|------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------|
-| `invalid PID 1: operation not permitted` | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Run on a Linux host.                                                  |
-| `could not find offset for function ...` | Symbol missing (older GoAkt, stripped binary)             | Use non-stripped binary. Optional probes use FailureModeWarn.         |
-| `permission denied`                      | eBPF requires capabilities                                | Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON` when running Docker. |
-| No spans in Jaeger                       | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).     |
-| `bpf_x86_bpfel.o: no matching files`     | BPF not generated                                         | Run `./scripts/generate-bpf.sh` on macOS/Windows.                     |
+| Issue                                        | Cause                                                     | Fix                                                                                                                                                                                                                                                        |
+|----------------------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `invalid PID 1: operation not permitted`     | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Run on a Linux host.                                                                                                                                                                                                                                       |
+| `could not find offset for function ...`     | Symbol missing (older GoAkt, stripped binary)             | Use non-stripped binary. Optional probes use FailureModeWarn.                                                                                                                                                                                              |
+| `permission denied`                          | eBPF requires capabilities                                | Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON` when running Docker.                                                                                                                                                                                      |
+| No spans in Jaeger                           | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                                                                                                                                          |
+| `bpf_x86_bpfel.o: no matching files`         | BPF not generated                                         | Run `./scripts/generate-bpf.sh` on macOS/Windows.                                                                                                                                                                                                          |
+| Actor spans appear as root spans (no parent) | Context not propagated, or Auto SDK used                  | (1) Pass the HTTP/gRPC handler `ctx` into `goakt.Tell`/`Ask`/`Spawn`. (2) Use the standard OTEL SDK (`sdktrace.NewTracerProvider`), not Auto SDK. (3) Confirm the `TracerProvider` is sampled. (4) Enable debug logs: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
 
 ## 📚 Documentation
 
