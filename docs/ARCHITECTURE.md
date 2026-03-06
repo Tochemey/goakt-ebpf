@@ -175,10 +175,10 @@ offset 80  size 64   spanContext trace.SpanContext  <- zero-initialized; never p
 
 #### Probe Order and Sampled Guard
 
-Layouts are probed in order C → A → B. Only span contexts with `TraceFlags & FlagsSampled != 0` are returned. This ensures:
-- Not-sampled spans (Layout B) never produce a parent link.
-- Layout C is tried first because it is the most common source of HTTP/gRPC parent spans and is unambiguously identified by `bytes[16:24] == 0` (unlocked mutex) with `TraceID` at offset 192.
-- Layouts A and B are tried when `bytes[16:24] != 0`, using TraceID position to discriminate.
+All layouts share `embedded.Span` (16 zero bytes) at offset 0 — this is checked first to reject non-span objects. Layouts are then probed in order C → A → B:
+- Layout C does **not** require `bytes[16:24]` (mutex) to be zero, since the mutex can be locked during an active HTTP/gRPC handler.
+- Layouts A and B are tried when Layout C doesn't match, using `bytes[16:24]` to discriminate between them.
+- Not-sampled spans (Layout B) are still returned; the caller decides whether to use them.
 
 Set `GOAKT_EBPF_DEBUG_CONTEXT_READER=1` to enable verbose per-node logging that reports which layout matched and how many nodes were visited.
 

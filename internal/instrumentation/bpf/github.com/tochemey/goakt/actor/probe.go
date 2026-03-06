@@ -275,11 +275,49 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 	}
 }
 
-// makeProcessFn returns a processFn that uses userspace context reading when targetPID > 0.
+// makeProcessFn returns a processFn that uses userspace context reading when
+// targetPID > 0. It buffers process/grainProcess events whose BPF parent
+// (doReceive) has not yet been processed — since process() is an inner call
+// that returns before doReceive(), its event always arrives first. When the
+// parent doReceive event arrives and resolves the app-level TraceID via
+// userspace extraction, the buffered child is fixed up and emitted together.
 func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanSlice {
+	pending := make(map[pcommon.SpanID]event) // BPF parent SpanID → buffered child
+	const maxPending = 256
+
 	return func(e *event) ptrace.SpanSlice {
-		return processEvent(e, logger, targetPID)
+		if isProcessWithBPFParent(e) {
+			if len(pending) >= maxPending {
+				clear(pending)
+			}
+			pending[pcommon.SpanID(e.ParentSpanContext.SpanID)] = *e
+			return ptrace.NewSpanSlice()
+		}
+
+		spans := processEvent(e, logger, targetPID)
+
+		if len(pending) > 0 {
+			myID := pcommon.SpanID(e.SpanContext.SpanID)
+			if pe, ok := pending[myID]; ok {
+				child := processEvent(&pe, logger, targetPID)
+				if child.Len() > 0 && spans.Len() > 0 {
+					child.At(0).SetTraceID(spans.At(0).TraceID())
+					child.MoveAndAppendTo(spans)
+				}
+				delete(pending, myID)
+			}
+		}
+
+		return spans
 	}
+}
+
+// isProcessWithBPFParent reports whether the event is a contextless process
+// span (context_pos=0) that obtained its parent from the BPF goid map.
+func isProcessWithBPFParent(e *event) bool {
+	return (e.EventType == eventTypeProcess || e.EventType == eventTypeGrainProcess) &&
+		e.ParentSpanContext.SpanID.IsValid() &&
+		e.ContextPtr == 0
 }
 
 // event represents an instrumentation event (layout must match C struct goakt_actor_span_t).

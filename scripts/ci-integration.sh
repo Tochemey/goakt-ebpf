@@ -53,6 +53,8 @@ sudo env \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SERVICE_NAME=goakt-ebpf \
   OTEL_TRACES_STDOUT=1 \
+  GOAKT_EBPF_DEBUG_CONTEXT_READER=1 \
+  GOAKT_EBPF_LOG_LEVEL=debug \
   /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
 

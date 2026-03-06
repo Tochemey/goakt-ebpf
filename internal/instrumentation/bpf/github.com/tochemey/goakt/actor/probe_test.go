@@ -90,3 +90,139 @@ func TestProcessEventParentPrecedence(t *testing.T) {
 		require.Equal(t, extracted.TraceID(), trace.TraceID(span.TraceID()))
 	})
 }
+
+func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
+	origExtract := extractParentSpanFromContext
+	t.Cleanup(func() { extractParentSpanFromContext = origExtract })
+
+	appTraceID := trace.TraceID{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22,
+		0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00}
+	appSpanID := trace.SpanID{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
+
+	extractParentSpanFromContext = func(_ int, _ uint64, _ *slog.Logger) *trace.SpanContext {
+		sc := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: appTraceID, SpanID: appSpanID, Remote: true,
+		})
+		return &sc
+	}
+
+	processFn := makeProcessFn(slog.Default(), 42)
+
+	bpfTraceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+	doReceiveBPFSpanID := trace.SpanID{0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55}
+	processBPFSpanID := trace.SpanID{0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66}
+
+	t.Run("buffers process event and resolves on doReceive", func(t *testing.T) {
+		processE := &event{
+			EventType: eventTypeProcess,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 10,
+				EndTime:   20,
+				SpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  processBPFSpanID,
+				},
+				ParentSpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  doReceiveBPFSpanID,
+				},
+			},
+			ContextPtr: 0, // process has no context
+		}
+
+		spans := processFn(processE)
+		require.Equal(t, 0, spans.Len(), "process event should be buffered")
+
+		doReceiveE := &event{
+			EventType: eventTypeDoReceive,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 5,
+				EndTime:   25,
+				SpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  doReceiveBPFSpanID,
+				},
+			},
+			ContextPtr: 0x1234,
+		}
+
+		spans = processFn(doReceiveE)
+		require.Equal(t, 2, spans.Len(), "doReceive should emit itself and the buffered process")
+
+		drSpan := spans.At(0)
+		require.Equal(t, "actor.doReceive", drSpan.Name())
+		require.Equal(t, appTraceID, trace.TraceID(drSpan.TraceID()))
+		require.Equal(t, appSpanID, trace.SpanID(drSpan.ParentSpanID()))
+
+		pSpan := spans.At(1)
+		require.Equal(t, "actor.process", pSpan.Name())
+		require.Equal(t, appTraceID, trace.TraceID(pSpan.TraceID()),
+			"process must inherit the userspace-resolved TraceID")
+		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(pSpan.ParentSpanID()),
+			"process parent should be doReceive's BPF SpanID")
+	})
+
+	t.Run("grain process buffered and resolved on grainDoReceive", func(t *testing.T) {
+		grainDRSpanID := trace.SpanID{0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77}
+		grainPSpanID := trace.SpanID{0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88}
+
+		grainProcessE := &event{
+			EventType: eventTypeGrainProcess,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 10,
+				EndTime:   20,
+				SpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  grainPSpanID,
+				},
+				ParentSpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  grainDRSpanID,
+				},
+			},
+			ContextPtr: 0,
+		}
+
+		spans := processFn(grainProcessE)
+		require.Equal(t, 0, spans.Len())
+
+		grainDRE := &event{
+			EventType: eventTypeGrainDoReceive,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 5,
+				EndTime:   25,
+				SpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  grainDRSpanID,
+				},
+			},
+			ContextPtr: 0x5678,
+		}
+
+		spans = processFn(grainDRE)
+		require.Equal(t, 2, spans.Len())
+
+		require.Equal(t, appTraceID, trace.TraceID(spans.At(0).TraceID()))
+		require.Equal(t, appTraceID, trace.TraceID(spans.At(1).TraceID()))
+	})
+
+	t.Run("process without BPF parent is not buffered", func(t *testing.T) {
+		e := &event{
+			EventType: eventTypeProcess,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 1,
+				EndTime:   2,
+				SpanContext: instcontext.EBPFSpanContext{
+					TraceID: bpfTraceID,
+					SpanID:  trace.SpanID{0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99},
+				},
+			},
+			ContextPtr: 0,
+		}
+
+		spans := processFn(e)
+		require.Equal(t, 1, spans.Len(), "process without BPF parent should emit immediately")
+		require.Equal(t, "actor.process", spans.At(0).Name())
+	})
+}
