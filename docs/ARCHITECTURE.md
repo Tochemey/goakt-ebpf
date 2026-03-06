@@ -52,43 +52,127 @@ Each instrumented function has:
 
 ## Instrumented Symbols (GoAkt v4)
 
-Full reference of probe targets, span names, and attributes:
+Full reference of probe targets, span names, and attributes. Symbols use the full package path `github.com/tochemey/goakt/v4/actor`.
 
-| Symbol                                            | Span                            | Attributes                                                  |
-|---------------------------------------------------|---------------------------------|-------------------------------------------------------------|
-| `(*PID).doReceive`                                | actor.doReceive                 | received_timestamp, handled_timestamp, handled_successfully |
-| `(*grainPID).handleGrainContext`                  | actor.grainDoReceive            | received_timestamp, handled_timestamp, handled_successfully |
-| `(*actorSystem).handleRemoteTell`                 | actor.remoteTell                | sent_timestamp                                              |
-| `(*actorSystem).handleRemoteAsk`                  | actor.remoteAsk                 | sent_timestamp                                              |
-| `(*actorSystem).remoteTellHandler`                | actor.remoteTellReceive         | received_timestamp                                          |
-| `(*actorSystem).remoteAskHandler`                 | actor.remoteAskReceive          | received_timestamp                                          |
-| `(*actorSystem).remoteTellGrain`                  | actor.remoteTellGrain           | sent_timestamp (grain client)                               |
-| `(*actorSystem).remoteAskGrain`                   | actor.remoteAskGrain            | sent_timestamp (grain client)                               |
-| `(*actorSystem).Spawn`                            | actor.systemSpawn               | actor.operation=spawn                                       |
-| `(*actorSystem).SpawnOn`                          | actor.spawnOn                   | actor.operation=spawn_on (remote placement, optional)       |
-| `(*actorSystem).remoteSpawnHandler`               | actor.remoteSpawn               | actor.operation=remote_spawn                                |
-| `(*actorSystem).remoteSpawnChildHandler`          | actor.remoteSpawnChild          | actor.operation=remote_spawn_child                          |
-| `(*actorSystem).remoteLookupHandler`              | actor.remoteLookup              | actor.operation=remote_lookup                               |
-| `(*actorSystem).remoteReSpawnHandler`             | actor.remoteReSpawn             | actor.operation=remote_respawn                              |
-| `(*actorSystem).remoteStopHandler`                | actor.remoteStop                | actor.operation=remote_stop                                 |
-| `(*actorSystem).remoteAskGrainHandler`            | actor.remoteAskGrainReceive     | received_timestamp (grain server)                           |
-| `(*actorSystem).remoteTellGrainHandler`           | actor.remoteTellGrainReceive    | received_timestamp (grain server)                           |
-| `(*actorSystem).remoteActivateGrainHandler`       | actor.remoteActivateGrain       | actor.operation=remote_activate_grain                       |
-| `(*actorSystem).remoteReinstateHandler`           | actor.remoteReinstate           | actor.operation=remote_reinstate                            |
-| `(*actorSystem).remotePassivationStrategyHandler` | actor.remotePassivationStrategy | (optional)                                                  |
-| `(*actorSystem).remoteStateHandler`               | actor.remoteState               | (optional)                                                  |
-| `(*actorSystem).remoteChildrenHandler`            | actor.remoteChildren            | (optional)                                                  |
-| `(*actorSystem).remoteParentHandler`              | actor.remoteParent              | (optional)                                                  |
-| `(*actorSystem).remoteKindHandler`                | actor.remoteKind                | (optional)                                                  |
-| `(*actorSystem).remoteDependenciesHandler`        | actor.remoteDependencies        | (optional)                                                  |
-| `(*actorSystem).remoteMetricHandler`              | actor.remoteMetric              | (optional)                                                  |
-| `(*actorSystem).remoteRoleHandler`                | actor.remoteRole                | (optional)                                                  |
-| `(*actorSystem).remoteStashSizeHandler`           | actor.remoteStashSize           | (optional)                                                  |
-| `(*PID).process`                                  | actor.process                   | actor.type=pid                                              |
-| `(*PID).SpawnChild`                               | actor.spawnChild                | actor.operation=spawn_child                                 |
-| `(*grainPID).process`                             | actor.grainProcess              | actor.type=grain                                            |
-| `(*relocator).Relocate`                           | actor.relocation                | actor.operation=relocation (optional)                       |
-| `(*PID).handleReceivedError`                      | (marks doReceive failed)        | handled_successfully=false                                  |
+### Message handling (PID)
+
+| Symbol                           | Span                     | Attributes                                                  |
+|----------------------------------|--------------------------|-------------------------------------------------------------|
+| `(*PID).doReceive`               | actor.doReceive          | received_timestamp, handled_timestamp, handled_successfully |
+| `(*PID).process`                 | actor.process            | actor.type=pid                                              |
+| `(*grainPID).handleGrainContext` | grain.doReceive          | received_timestamp, handled_timestamp, handled_successfully |
+| `(*grainPID).process`            | grain.process            | actor.type=grain                                            |
+| `(*PID).handleReceivedError`     | (marks doReceive failed) | handled_successfully=false                                  |
+
+### Local messaging (PID)
+
+| Symbol             | Span            | Attributes     |
+|--------------------|-----------------|----------------|
+| `(*PID).Tell`      | actor.tell      | sent_timestamp |
+| `(*PID).Ask`       | actor.ask       | sent_timestamp |
+| `(*PID).SendAsync` | actor.sendAsync | sent_timestamp |
+| `(*PID).SendSync`  | actor.sendSync  | sent_timestamp |
+| `(*PID).BatchTell` | actor.batchTell | sent_timestamp |
+| `(*PID).BatchAsk`  | actor.batchAsk  | sent_timestamp |
+
+### Remote messaging (System)
+
+| Symbol                                      | Span                          | Attributes                            |
+|---------------------------------------------|-------------------------------|---------------------------------------|
+| `(*actorSystem).handleRemoteTell`           | actorSystem.remoteTell        | sent_timestamp                        |
+| `(*actorSystem).handleRemoteAsk`            | actorSystem.remoteAsk         | sent_timestamp                        |
+| `(*actorSystem).remoteTellHandler`          | actorSystem.remoteTellReceive | received_timestamp                    |
+| `(*actorSystem).remoteAskHandler`           | actorSystem.remoteAskReceive  | received_timestamp                    |
+| `(*actorSystem).remoteTellGrain`            | grain.remoteTell              | sent_timestamp                        |
+| `(*actorSystem).remoteAskGrain`             | grain.remoteAsk               | sent_timestamp                        |
+| `(*actorSystem).remoteAskGrainHandler`      | grain.remoteAskReceive        | received_timestamp                    |
+| `(*actorSystem).remoteTellGrainHandler`     | grain.remoteTellReceive       | received_timestamp                    |
+| `(*actorSystem).remoteActivateGrainHandler` | grain.remoteActivate          | actor.operation=remote_activate_grain |
+
+### Spawn lifecycle (System)
+
+| Symbol                                   | Span                           | Attributes                            |
+|------------------------------------------|--------------------------------|---------------------------------------|
+| `(*actorSystem).Spawn`                   | actorSystem.spawn              | actor.operation=spawn                 |
+| `(*actorSystem).SpawnOn`                 | actorSystem.spawnOn            | actor.operation=spawn_on              |
+| `(*actorSystem).ActorOf`                 | actorSystem.actorOf            | actor.operation=actor_of              |
+| `(*actorSystem).SpawnNamedFromFunc`      | actorSystem.spawnNamedFromFunc | actor.operation=spawn_named_from_func |
+| `(*actorSystem).SpawnFromFunc`           | actorSystem.spawnFromFunc      | actor.operation=spawn_from_func       |
+| `(*actorSystem).SpawnRouter`             | actorSystem.spawnRouter        | actor.operation=spawn_router          |
+| `(*actorSystem).SpawnSingleton`          | actorSystem.spawnSingleton     | actor.operation=spawn_singleton       |
+| `(*actorSystem).remoteSpawnHandler`      | actorSystem.remoteSpawn        | actor.operation=remote_spawn          |
+| `(*actorSystem).remoteSpawnChildHandler` | actorSystem.remoteSpawnChild   | actor.operation=remote_spawn_child    |
+
+### Spawn lifecycle (PID)
+
+| Symbol              | Span             | Attributes                  |
+|---------------------|------------------|-----------------------------|
+| `(*PID).SpawnChild` | actor.spawnChild | actor.operation=spawn_child |
+
+### Actor system operations
+
+| Symbol                       | Span                    | Attributes                    |
+|------------------------------|-------------------------|-------------------------------|
+| `(*actorSystem).Start`       | actorSystem.start       | actor.operation=start         |
+| `(*actorSystem).Stop`        | actorSystem.stop        | actor.operation=stop          |
+| `(*actorSystem).Kill`        | actorSystem.kill        | actor.operation=kill          |
+| `(*actorSystem).ReSpawn`     | actorSystem.reSpawn     | actor.operation=respawn       |
+| `(*actorSystem).ActorExists` | actorSystem.actorExists | actor.operation=actor_exists  |
+| `(*actorSystem).Actors`      | actorSystem.actors      | actor.operation=actors        |
+| `(*actorSystem).Metric`      | actorSystem.metric      | actor.operation=system_metric |
+
+### Scheduling (System)
+
+| Symbol                            | Span                         | Attributes                         |
+|-----------------------------------|------------------------------|------------------------------------|
+| `(*actorSystem).ScheduleOnce`     | actorSystem.scheduleOnce     | actor.operation=schedule_once      |
+| `(*actorSystem).Schedule`         | actorSystem.schedule         | actor.operation=schedule           |
+| `(*actorSystem).ScheduleWithCron` | actorSystem.scheduleWithCron | actor.operation=schedule_with_cron |
+
+### Remote metadata and lifecycle (System)
+
+| Symbol                                            | Span                                  | Attributes                                  |
+|---------------------------------------------------|---------------------------------------|---------------------------------------------|
+| `(*actorSystem).remoteLookupHandler`              | actorSystem.remoteLookup              | actor.operation=remote_lookup               |
+| `(*actorSystem).remoteReSpawnHandler`             | actorSystem.remoteReSpawn             | actor.operation=remote_respawn              |
+| `(*actorSystem).remoteStopHandler`                | actorSystem.remoteStop                | actor.operation=remote_stop                 |
+| `(*actorSystem).remoteReinstateHandler`           | actorSystem.remoteReinstate           | actor.operation=remote_reinstate            |
+| `(*actorSystem).remotePassivationStrategyHandler` | actorSystem.remotePassivationStrategy | actor.operation=remote_passivation_strategy |
+| `(*actorSystem).remoteStateHandler`               | actorSystem.remoteState               | actor.operation=remote_state                |
+| `(*actorSystem).remoteChildrenHandler`            | actorSystem.remoteChildren            | actor.operation=remote_children             |
+| `(*actorSystem).remoteParentHandler`              | actorSystem.remoteParent              | actor.operation=remote_parent               |
+| `(*actorSystem).remoteKindHandler`                | actorSystem.remoteKind                | actor.operation=remote_kind                 |
+| `(*actorSystem).remoteDependenciesHandler`        | actorSystem.remoteDependencies        | actor.operation=remote_dependencies         |
+| `(*actorSystem).remoteMetricHandler`              | actorSystem.remoteMetric              | actor.operation=remote_metric               |
+| `(*actorSystem).remoteRoleHandler`                | actorSystem.remoteRole                | actor.operation=remote_role                 |
+| `(*actorSystem).remoteStashSizeHandler`           | actorSystem.remoteStashSize           | actor.operation=remote_stash_size           |
+
+### Remote operations (PID)
+
+| Symbol                 | Span                | Attributes                     |
+|------------------------|---------------------|--------------------------------|
+| `(*PID).RemoteLookup`  | actor.remoteLookup  | actor.operation=remote_lookup  |
+| `(*PID).RemoteStop`    | actor.remoteStop    | actor.operation=remote_stop    |
+| `(*PID).RemoteReSpawn` | actor.remoteReSpawn | actor.operation=remote_respawn |
+
+### PID operations
+
+| Symbol                  | Span                 | Attributes                      |
+|-------------------------|----------------------|---------------------------------|
+| `(*PID).Stop`           | actor.stop           | actor.operation=stop            |
+| `(*PID).Restart`        | actor.restart        | actor.operation=restart         |
+| `(*PID).Metric`         | actor.metric         | actor.operation=metric          |
+| `(*PID).ReinstateNamed` | actor.reinstateNamed | actor.operation=reinstate_named |
+| `(*PID).PipeTo`         | actor.pipeTo         | actor.operation=pipe_to         |
+| `(*PID).PipeToName`     | actor.pipeToName     | actor.operation=pipe_to_name    |
+| `(*PID).DiscoverActor`  | actor.discoverActor  | actor.operation=discover_actor  |
+| `(*PID).Shutdown`       | actor.shutdown       | actor.operation=shutdown        |
+
+### Relocation
+
+| Symbol                  | Span             | Attributes                 |
+|-------------------------|------------------|----------------------------|
+| `(*relocator).Relocate` | actor.relocation | actor.operation=relocation |
 
 ## Trace Context Propagation
 
@@ -100,11 +184,11 @@ Every probe that has access to `context.Context` calls `get_Go_context()` to rea
 
 `start_span_and_store` accepts per-probe parameters (`context_pos`, `context_offset`, `passed_as_arg`) to handle both patterns:
 
-| Context source | `passed_as_arg` | `context_pos` | `context_offset` |
-|---|---|---|---|
-| `context.Context` as direct arg (e.g. `Spawn`, `handleRemoteTell`) | true | 2 | 0 |
-| `context.Context` inside struct (e.g. `ReceiveContext`) | false | 2 | DWARF offset |
-| No context (e.g. `process()`) | — | 0 | — |
+| Context source                                                     | `passed_as_arg` | `context_pos` | `context_offset` |
+|--------------------------------------------------------------------|-----------------|---------------|------------------|
+| `context.Context` as direct arg (e.g. `Spawn`, `handleRemoteTell`) | true            | 2             | 0                |
+| `context.Context` inside struct (e.g. `ReceiveContext`)            | false           | 2             | DWARF offset     |
+| No context (e.g. `process()`)                                      | —               | 0             | —                |
 
 This links spans that share a context (e.g. `actor.doReceive` as parent of nested calls via the same context). It does not help when the parent span comes from application-level OTEL, since `go_context_to_sc` only contains spans created by goakt-ebpf probes.
 
@@ -221,21 +305,21 @@ The buffer is bounded (`maxPending = 256`) with `clear` on overflow. Events are 
 
 ### Context Extraction by Method
 
-| Symbol | Context source | `passed_as_arg` | `context_pos` | `context_offset` |
-|---|---|---|---|---|
-| `(*PID).doReceive` | ReceiveContext | false | 2 | DWARF: `ReceiveContext.Context` |
-| `(*grainPID).handleGrainContext` | ReceiveContext | false | 2 | DWARF: `ReceiveContext.Context` |
-| `(*actorSystem).handleRemoteTell` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).handleRemoteAsk` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).Spawn` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).SpawnOn` | Direct arg | true | 2 | 0 |
-| `(*PID).SpawnChild` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).remote*Handler` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).remoteTellGrain` | Direct arg | true | 2 | 0 |
-| `(*actorSystem).remoteAskGrain` | Direct arg | true | 2 | 0 |
-| `(*relocator).Relocate` | Direct arg | true | 2 | 0 |
-| `(*PID).process` | No context | — | 0 | — |
-| `(*grainPID).process` | No context | — | 0 | — |
+| Symbol                            | Context source | `passed_as_arg` | `context_pos` | `context_offset`                |
+|-----------------------------------|----------------|-----------------|---------------|---------------------------------|
+| `(*PID).doReceive`                | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.Context` |
+| `(*grainPID).handleGrainContext`  | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.Context` |
+| `(*actorSystem).handleRemoteTell` | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).handleRemoteAsk`  | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).Spawn`            | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).SpawnOn`          | Direct arg     | true            | 2             | 0                               |
+| `(*PID).SpawnChild`               | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).remote*Handler`   | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).remoteTellGrain`  | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).remoteAskGrain`   | Direct arg     | true            | 2             | 0                               |
+| `(*relocator).Relocate`           | Direct arg     | true            | 2             | 0                               |
+| `(*PID).process`                  | No context     | —               | 0             | —                               |
+| `(*grainPID).process`             | No context     | —               | 0             | —                               |
 
 ## Dependencies
 
