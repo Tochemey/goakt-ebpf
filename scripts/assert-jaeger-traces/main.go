@@ -56,6 +56,7 @@ var manualSpanNames = map[string]bool{
 // nolint:gocognit
 // nolint:gocyclo
 func main() {
+	// set jeager query URL and service name via env vars for CI flexibility; defaults work for local testing with docker-compose
 	baseURL := strings.TrimSuffix(envOr("JAEGER_QUERY_URL", "http://localhost:16686"), "/")
 	service := envOr("JAEGER_SERVICE", "goakt-ebpf")
 
