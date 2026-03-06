@@ -90,19 +90,6 @@ func main() {
 				expectedNames[s.OperationName] = true
 			}
 
-			for _, ref := range s.References {
-				if ref.RefType != "CHILD_OF" || ref.SpanID == "" {
-					continue
-				}
-				if ref.TraceID != "" && ref.TraceID != t.TraceID {
-					continue
-				}
-				if _, ok := spanByID[ref.SpanID]; !ok {
-					fmt.Fprintf(os.Stderr, "assert-jaeger-traces: warning: span %s (%s) references parent %s not found in trace %s (cross-service parent)\n",
-						s.SpanID, s.OperationName, ref.SpanID, t.TraceID)
-				}
-			}
-
 			hasParent := hasChildOfRef(s)
 
 			switch s.OperationName {

@@ -40,6 +40,7 @@ HTTP_PORT=8080
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
 OTEL_SERVICE_NAME=integration-app \
+OTEL_TRACES_STDOUT=1 \
 HTTP_PORT=$HTTP_PORT \
 /tmp/integration-app &
 APP_PID=$!
@@ -51,6 +52,7 @@ sudo env \
   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SERVICE_NAME=goakt-ebpf \
+  OTEL_TRACES_STDOUT=1 \
   /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
 
