@@ -25,8 +25,6 @@ Your GoAkt app          goakt-ebpf agent         OTLP backend
       (no changes)        (sidecar process)
 ```
 
-**Your application does not need any OpenTelemetry SDK, any tracing library, or any code changes.** The agent produces complete actor traces on its own.
-
 ## Connecting App Spans to Actor Spans
 
 If your application already uses the **standard OpenTelemetry Go SDK** (`go.opentelemetry.io/otel/sdk`) to create spans — from HTTP handlers, gRPC interceptors, or manual `tracer.Start` calls — goakt-ebpf automatically links its actor spans as children of your application spans.
