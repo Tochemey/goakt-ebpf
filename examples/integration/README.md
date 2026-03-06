@@ -1,7 +1,5 @@
 # Integration Example
 
-> **Note:** This implementation is still WIP (work in progress).
-
 End-to-end example for goakt-ebpf using Docker Compose. Run this locally to verify the agent works with a GoAkt application.
 
 ## 📋 Prerequisites
@@ -33,14 +31,7 @@ When prompted, choose **Proceed with the current configuration** (or customize C
 limactl start --name=ebpf --vm-type=qemu template:docker
 ```
 
-When ready, use the `ebpf` instance:
-
-```bash
-export DOCKER_HOST=$(limactl list ebpf --format 'unix://{{.Dir}}/sock/docker.sock')
-make down && make build && make start
-```
-
-QEMU is slower than vz but uses a more standard Linux kernel that supports eBPF.
+QEMU is slower than vz but uses a more standard Linux kernel that supports eBPF. If you use the QEMU instance, substitute `ebpf` for `docker` in the commands below.
 
 ### 3. Point Docker CLI at the Lima VM
 
@@ -48,6 +39,12 @@ QEMU is slower than vz but uses a more standard Linux kernel that supports eBPF.
 
 ```bash
 export DOCKER_HOST=$(limactl list docker --format 'unix://{{.Dir}}/sock/docker.sock')
+```
+
+If you created a QEMU instance named `ebpf`, use:
+
+```bash
+export DOCKER_HOST=$(limactl list ebpf --format 'unix://{{.Dir}}/sock/docker.sock')
 ```
 
 Add this line to your `~/.zshrc` or `~/.bashrc` so it runs in new shells. **Quit and reopen your terminal** (or run the export) before `make start`.
@@ -83,10 +80,10 @@ Run `make view` to open the Jaeger UI, or go to http://localhost:16686. Select s
 When done, stop the VM to free resources:
 
 ```bash
-limactl stop docker
+limactl stop docker   # or limactl stop ebpf if you created a QEMU instance
 ```
 
-Start it again later with `limactl start docker`.
+Start it again later with `limactl start docker` (or `limactl start ebpf`).
 
 ---
 
@@ -119,12 +116,12 @@ Or with Docker Compose directly:
 docker compose -f examples/integration/docker-compose.yml up --build
 ```
 
-| Service            | Purpose                                     | Ports      |
-|--------------------|---------------------------------------------|------------|
-| **goakt-app**      | Minimal GoAkt app (Tell/Ask between actors) | —          |
-| **goakt-ebpf**     | eBPF agent attaching to goakt-app           | —          |
-| **otel-collector** | Receives OTLP traces, forwards to Jaeger    | 4317, 4318 |
-| **jaeger**         | Trace visualization                         | 16686 (UI) |
+| Service            | Purpose                                     | Ports       |
+|--------------------|---------------------------------------------|-------------|
+| **goakt-app**      | Minimal GoAkt app (Tell/Ask between actors) | 8080 (HTTP) |
+| **goakt-ebpf**     | eBPF agent attaching to goakt-app           | —           |
+| **otel-collector** | Receives OTLP traces, forwards to Jaeger    | 4317, 4318  |
+| **jaeger**         | Trace visualization                         | 16686 (UI)  |
 
 ## 🎯 View Traces
 
@@ -140,14 +137,17 @@ The app sends Tell and Ask messages every 5 seconds (so the agent, which attache
 
 ### Trace validation (CI)
 
-The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger:
+The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger. It fetches traces from both the `goakt-ebpf` and `integration-app` services and merges them by trace ID so cross-service parent references resolve correctly. The 9 assertions:
 
-- **Expected span names:** `actor.doReceive`, `actor.process` (from Tell/Ask and message handling; `actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
-- **App span names:** At least one of `send-tell`, `send-ask` (manual), or `GET /echo`, `GET /ask` (otelhttp)
-- **Minimum span count:** ≥ 4 spans across all traces
-- **Parent propagation:** Spans with `CHILD_OF` references have their parent span present in the same trace
-- **Layout C assertion:** At least one `actor.doReceive` span must have an app span as parent — validates that the userspace context reader correctly extracts parent span context from `*sdk/trace.recordingSpan` (manual and otelhttp paths)
-- **HTTP assertion:** If `GET /echo` or `GET /ask` spans exist, at least one `actor.doReceive` must have them as parent — validates otelhttp + Layout C (span-in-use/mutex) propagation
+1. **Required span names:** `actor.doReceive`, `actor.process`, `send-tell`, `send-ask`, `GET /echo`, `GET /ask` — all must be present (`actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
+2. **Minimum span count:** ≥ 6 spans across all traces
+3. **Multi-span traces:** At least one trace must contain more than 1 span (context propagation working)
+4. **actor.process → actor.doReceive:** ≥ 30% of `actor.process` spans must have `actor.doReceive` as their parent (validates buffering/goroutine ID propagation)
+5. **actor.doReceive → app span:** At least one `actor.doReceive` span must have an app span (`send-tell`, `send-ask`, `GET /echo`, or `GET /ask`) as parent — validates userspace context extraction from `*sdk/trace.recordingSpan`
+6. **Both paths:** At least one `actor.doReceive` must have an HTTP parent (`GET /echo` or `GET /ask`) and at least one must have a manual parent (`send-tell` or `send-ask`)
+7. **Complete 3-level chains:** At least one app → `actor.doReceive` → `actor.process` chain must exist
+8. **HTTP complete chain:** At least one `GET /echo` or `GET /ask` → `actor.doReceive` → `actor.process` chain
+9. **Manual complete chain:** At least one `send-tell` or `send-ask` → `actor.doReceive` → `actor.process` chain
 
 Set `JAEGER_QUERY_URL` (default `http://localhost:16686`) and `JAEGER_SERVICE` (default `goakt-ebpf`) to override.
 
