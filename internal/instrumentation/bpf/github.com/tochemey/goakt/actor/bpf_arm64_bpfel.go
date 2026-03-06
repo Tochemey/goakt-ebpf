@@ -83,6 +83,8 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
+	UprobeActorOf                                 *ebpf.ProgramSpec `ebpf:"uprobe_ActorOf"`
+	UprobeActorOfReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_ActorOf_Returns"`
 	UprobeRelocate                                *ebpf.ProgramSpec `ebpf:"uprobe_Relocate"`
 	UprobeRelocateReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_Relocate_Returns"`
 	UprobeSpawn                                   *ebpf.ProgramSpec `ebpf:"uprobe_Spawn"`
@@ -157,6 +159,7 @@ type bpfMapSpecs struct {
 	AllocMap                            *ebpf.MapSpec `ebpf:"alloc_map"`
 	Events                              *ebpf.MapSpec `ebpf:"events"`
 	GoContextToSc                       *ebpf.MapSpec `ebpf:"go_context_to_sc"`
+	GoaktActorActorOf                   *ebpf.MapSpec `ebpf:"goakt_actor_actor_of"`
 	GoaktActorDoReceive                 *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
 	GoaktActorGoidToSpanContext         *ebpf.MapSpec `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
@@ -231,6 +234,7 @@ type bpfMaps struct {
 	AllocMap                            *ebpf.Map `ebpf:"alloc_map"`
 	Events                              *ebpf.Map `ebpf:"events"`
 	GoContextToSc                       *ebpf.Map `ebpf:"go_context_to_sc"`
+	GoaktActorActorOf                   *ebpf.Map `ebpf:"goakt_actor_actor_of"`
 	GoaktActorDoReceive                 *ebpf.Map `ebpf:"goakt_actor_do_receive"`
 	GoaktActorGoidToSpanContext         *ebpf.Map `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
@@ -276,6 +280,7 @@ func (m *bpfMaps) Close() error {
 		m.AllocMap,
 		m.Events,
 		m.GoContextToSc,
+		m.GoaktActorActorOf,
 		m.GoaktActorDoReceive,
 		m.GoaktActorGoidToSpanContext,
 		m.GoaktActorGrainDoReceive,
@@ -332,6 +337,8 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
+	UprobeActorOf                                 *ebpf.Program `ebpf:"uprobe_ActorOf"`
+	UprobeActorOfReturns                          *ebpf.Program `ebpf:"uprobe_ActorOf_Returns"`
 	UprobeRelocate                                *ebpf.Program `ebpf:"uprobe_Relocate"`
 	UprobeRelocateReturns                         *ebpf.Program `ebpf:"uprobe_Relocate_Returns"`
 	UprobeSpawn                                   *ebpf.Program `ebpf:"uprobe_Spawn"`
@@ -401,6 +408,8 @@ type bpfPrograms struct {
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.UprobeActorOf,
+		p.UprobeActorOfReturns,
 		p.UprobeRelocate,
 		p.UprobeRelocateReturns,
 		p.UprobeSpawn,

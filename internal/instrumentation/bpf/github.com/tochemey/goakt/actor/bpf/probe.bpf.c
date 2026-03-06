@@ -48,6 +48,38 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define EVENT_TYPE_REMOTE_METRIC 29
 #define EVENT_TYPE_REMOTE_ROLE 30
 #define EVENT_TYPE_REMOTE_STASH_SIZE 31
+#define EVENT_TYPE_ACTOR_OF 33
+#define EVENT_TYPE_SPAWN_NAMED_FROM_FUNC 34
+#define EVENT_TYPE_SPAWN_FROM_FUNC 35
+#define EVENT_TYPE_SPAWN_ROUTER 36
+#define EVENT_TYPE_SPAWN_SINGLETON 37
+#define EVENT_TYPE_KILL 38
+#define EVENT_TYPE_RE_SPAWN 39
+#define EVENT_TYPE_ACTOR_EXISTS 40
+#define EVENT_TYPE_SYSTEM_METRIC 41
+#define EVENT_TYPE_ACTORS 42
+#define EVENT_TYPE_START 43
+#define EVENT_TYPE_STOP 44
+#define EVENT_TYPE_SCHEDULE_ONCE 45
+#define EVENT_TYPE_SCHEDULE 46
+#define EVENT_TYPE_SCHEDULE_WITH_CRON 47
+#define EVENT_TYPE_TELL 48
+#define EVENT_TYPE_ASK 49
+#define EVENT_TYPE_SEND_ASYNC 50
+#define EVENT_TYPE_SEND_SYNC 51
+#define EVENT_TYPE_DISCOVER_ACTOR 52
+#define EVENT_TYPE_PID_STOP 53
+#define EVENT_TYPE_RESTART 54
+#define EVENT_TYPE_PID_METRIC 55
+#define EVENT_TYPE_REINSTATE_NAMED 56
+#define EVENT_TYPE_PIPE_TO 57
+#define EVENT_TYPE_PIPE_TO_NAME 58
+#define EVENT_TYPE_BATCH_TELL 59
+#define EVENT_TYPE_BATCH_ASK 60
+#define EVENT_TYPE_PID_REMOTE_LOOKUP 61
+#define EVENT_TYPE_PID_REMOTE_STOP 62
+#define EVENT_TYPE_PID_REMOTE_RE_SPAWN 63
+#define EVENT_TYPE_SHUTDOWN 64
 
 struct goakt_actor_span_t {
 	u8 event_type;
@@ -285,6 +317,200 @@ struct {
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_stash_size SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_actor_of SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_spawn_named_from_func SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_spawn_from_func SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_spawn_router SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_spawn_singleton SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_kill SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_re_spawn SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_actor_exists SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_system_metric SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_actors SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_start SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_stop SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_schedule_once SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_schedule SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_schedule_with_cron SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_tell SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_ask SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_send_async SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_send_sync SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_discover_actor SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pid_stop SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_restart SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pid_metric SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_reinstate_named SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pipe_to SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pipe_to_name SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_batch_tell SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_batch_ask SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pid_remote_lookup SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pid_remote_stop SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_pid_remote_re_spawn SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_shutdown SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -1184,6 +1410,168 @@ int uprobe_remoteStashSizeHandler_Returns(struct pt_regs *ctx) {
 	finish_span_and_output(ctx, key, &goakt_actor_remote_stash_size);
 	return 0;
 }
+
+// --- (*actorSystem).ActorOf ---
+SEC("uprobe/ActorOf")
+int uprobe_ActorOf(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_actor_of, &key) != NULL) {
+		return 0;
+	}
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_ACTOR_OF,
+			    &goakt_actor_actor_of, 2, 0, true);
+	return 0;
+}
+SEC("uprobe/ActorOf_Returns")
+int uprobe_ActorOf_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_actor_of);
+	return 0;
+}
+
+#define PROBE_ENTRY_RETURN(name, map, event_type) \
+SEC("uprobe/" name) \
+int uprobe_##name(struct pt_regs *ctx) { \
+	void *key = (void *)GOROUTINE(ctx); \
+	if (bpf_map_lookup_elem(&map, &key) != NULL) return 0; \
+	u32 map_id = 0; \
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id); \
+	if (uprobe_data == NULL) return 0; \
+	start_span_and_store(ctx, key, uprobe_data, event_type, &map, 2, 0, true); \
+	return 0; \
+} \
+SEC("uprobe/" name "_Returns") \
+int uprobe_##name##_Returns(struct pt_regs *ctx) { \
+	void *key = (void *)GOROUTINE(ctx); \
+	finish_span_and_output(ctx, key, &map); \
+	return 0; \
+}
+
+PROBE_ENTRY_RETURN(SpawnNamedFromFunc, goakt_actor_spawn_named_from_func, EVENT_TYPE_SPAWN_NAMED_FROM_FUNC)
+PROBE_ENTRY_RETURN(SpawnFromFunc, goakt_actor_spawn_from_func, EVENT_TYPE_SPAWN_FROM_FUNC)
+PROBE_ENTRY_RETURN(SpawnRouter, goakt_actor_spawn_router, EVENT_TYPE_SPAWN_ROUTER)
+PROBE_ENTRY_RETURN(SpawnSingleton, goakt_actor_spawn_singleton, EVENT_TYPE_SPAWN_SINGLETON)
+PROBE_ENTRY_RETURN(Kill, goakt_actor_kill, EVENT_TYPE_KILL)
+PROBE_ENTRY_RETURN(ReSpawn, goakt_actor_re_spawn, EVENT_TYPE_RE_SPAWN)
+PROBE_ENTRY_RETURN(ActorExists, goakt_actor_actor_exists, EVENT_TYPE_ACTOR_EXISTS)
+PROBE_ENTRY_RETURN(Actors, goakt_actor_actors, EVENT_TYPE_ACTORS)
+PROBE_ENTRY_RETURN(Start, goakt_actor_start, EVENT_TYPE_START)
+PROBE_ENTRY_RETURN(ScheduleOnce, goakt_actor_schedule_once, EVENT_TYPE_SCHEDULE_ONCE)
+PROBE_ENTRY_RETURN(Schedule, goakt_actor_schedule, EVENT_TYPE_SCHEDULE)
+PROBE_ENTRY_RETURN(ScheduleWithCron, goakt_actor_schedule_with_cron, EVENT_TYPE_SCHEDULE_WITH_CRON)
+
+/* actorSystem.Stop and actorSystem.Metric - unique SEC names to avoid PID conflict */
+SEC("uprobe/actorSystem_Stop")
+int uprobe_actorSystem_Stop(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_stop, &key) != NULL) return 0;
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) return 0;
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_STOP, &goakt_actor_stop, 2, 0, true);
+	return 0;
+}
+SEC("uprobe/actorSystem_Stop_Returns")
+int uprobe_actorSystem_Stop_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_stop);
+	return 0;
+}
+SEC("uprobe/actorSystem_Metric")
+int uprobe_actorSystem_Metric(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_system_metric, &key) != NULL) return 0;
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) return 0;
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_SYSTEM_METRIC, &goakt_actor_system_metric, 2, 0, true);
+	return 0;
+}
+SEC("uprobe/actorSystem_Metric_Returns")
+int uprobe_actorSystem_Metric_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_system_metric);
+	return 0;
+}
+
+#undef PROBE_ENTRY_RETURN
+
+// --- (*PID) methods (same package, different receiver) ---
+#define PROBE_PID_ENTRY_RETURN(name, map, event_type) \
+SEC("uprobe/" name) \
+int uprobe_##name(struct pt_regs *ctx) { \
+	void *key = (void *)GOROUTINE(ctx); \
+	if (bpf_map_lookup_elem(&map, &key) != NULL) return 0; \
+	u32 map_id = 0; \
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id); \
+	if (uprobe_data == NULL) return 0; \
+	start_span_and_store(ctx, key, uprobe_data, event_type, &map, 2, 0, true); \
+	return 0; \
+} \
+SEC("uprobe/" name "_Returns") \
+int uprobe_##name##_Returns(struct pt_regs *ctx) { \
+	void *key = (void *)GOROUTINE(ctx); \
+	finish_span_and_output(ctx, key, &map); \
+	return 0; \
+}
+
+PROBE_PID_ENTRY_RETURN(Tell, goakt_actor_tell, EVENT_TYPE_TELL)
+PROBE_PID_ENTRY_RETURN(Ask, goakt_actor_ask, EVENT_TYPE_ASK)
+PROBE_PID_ENTRY_RETURN(SendAsync, goakt_actor_send_async, EVENT_TYPE_SEND_ASYNC)
+PROBE_PID_ENTRY_RETURN(SendSync, goakt_actor_send_sync, EVENT_TYPE_SEND_SYNC)
+PROBE_PID_ENTRY_RETURN(DiscoverActor, goakt_actor_discover_actor, EVENT_TYPE_DISCOVER_ACTOR)
+PROBE_PID_ENTRY_RETURN(Restart, goakt_actor_restart, EVENT_TYPE_RESTART)
+PROBE_PID_ENTRY_RETURN(ReinstateNamed, goakt_actor_reinstate_named, EVENT_TYPE_REINSTATE_NAMED)
+PROBE_PID_ENTRY_RETURN(PipeTo, goakt_actor_pipe_to, EVENT_TYPE_PIPE_TO)
+PROBE_PID_ENTRY_RETURN(PipeToName, goakt_actor_pipe_to_name, EVENT_TYPE_PIPE_TO_NAME)
+PROBE_PID_ENTRY_RETURN(BatchTell, goakt_actor_batch_tell, EVENT_TYPE_BATCH_TELL)
+PROBE_PID_ENTRY_RETURN(BatchAsk, goakt_actor_batch_ask, EVENT_TYPE_BATCH_ASK)
+PROBE_PID_ENTRY_RETURN(RemoteLookup, goakt_actor_pid_remote_lookup, EVENT_TYPE_PID_REMOTE_LOOKUP)
+PROBE_PID_ENTRY_RETURN(RemoteStop, goakt_actor_pid_remote_stop, EVENT_TYPE_PID_REMOTE_STOP)
+PROBE_PID_ENTRY_RETURN(RemoteReSpawn, goakt_actor_pid_remote_re_spawn, EVENT_TYPE_PID_REMOTE_RE_SPAWN)
+PROBE_PID_ENTRY_RETURN(Shutdown, goakt_actor_shutdown, EVENT_TYPE_SHUTDOWN)
+
+/* PID.Stop and PID.Metric - unique SEC names to avoid actorSystem conflict */
+SEC("uprobe/pid_Stop")
+int uprobe_pid_Stop(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_pid_stop, &key) != NULL) return 0;
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) return 0;
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_PID_STOP, &goakt_actor_pid_stop, 2, 0, true);
+	return 0;
+}
+SEC("uprobe/pid_Stop_Returns")
+int uprobe_pid_Stop_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_pid_stop);
+	return 0;
+}
+SEC("uprobe/pid_Metric")
+int uprobe_pid_Metric(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (bpf_map_lookup_elem(&goakt_actor_pid_metric, &key) != NULL) return 0;
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) return 0;
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_PID_METRIC, &goakt_actor_pid_metric, 2, 0, true);
+	return 0;
+}
+SEC("uprobe/pid_Metric_Returns")
+int uprobe_pid_Metric_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_pid_metric);
+	return 0;
+}
+
+#undef PROBE_PID_ENTRY_RETURN
 
 // --- (*PID).handleReceivedError ---
 // Called from within doReceive when message handling fails. Marks the active
