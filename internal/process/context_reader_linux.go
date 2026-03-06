@@ -112,21 +112,23 @@ func tryReadSpanContext(pid int, addr uint64, buf []byte, logger *slog.Logger) *
 		return nil
 	}
 
-	if !isZero(buf[0:16]) {
-		return nil
+	// Try Layout C (recordingSpan) first — most common for otelhttp/otelgrpc.
+	// Do not require buf[16:24] (mutex) to be zero: when the span is in use,
+	// the mutex can be locked, causing the previous heuristic to fail and
+	// incorrectly fall through to Layout A (wrong offsets).
+	if sc := extractSpanContext(buf, layoutCTraceIDOff, layoutCSpanIDOff, layoutCFlagsOff); sc != nil {
+		if debugContextReader {
+			logger.Debug("matched span layout C (sdk/trace.recordingSpan)",
+				"trace_id", sc.TraceID(),
+				"span_id", sc.SpanID(),
+				"addr", addr,
+			)
+		}
+		return sc
 	}
 
-	if isZero(buf[16:24]) {
-		if sc := extractSpanContext(buf, layoutCTraceIDOff, layoutCSpanIDOff, layoutCFlagsOff); sc != nil {
-			if debugContextReader {
-				logger.Debug("matched span layout C (sdk/trace.recordingSpan)",
-					"trace_id", sc.TraceID(),
-					"span_id", sc.SpanID(),
-					"addr", addr,
-				)
-			}
-			return sc
-		}
+	if !isZero(buf[0:16]) {
+		return nil
 	}
 
 	if !isZero(buf[16:24]) {

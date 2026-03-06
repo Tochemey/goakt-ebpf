@@ -53,23 +53,29 @@ func main() {
 		"actor.process":   false,
 	}
 
-	appSpanNames := map[string]bool{"send-tell": false, "send-ask": false}
+	// App span sources: manual tracer.Start and otelhttp (HTTP handlers).
+	// Validates Layout C context extraction from recordingSpan in both paths.
+	appSpanNames := map[string]bool{
+		"send-tell": false, "send-ask": false, // manual
+		"GET /echo": false, "GET /ask": false, // otelhttp
+	}
 
 	var (
-		totalSpans           int
-		processWithParent    int
-		processTotal         int
-		receiveWithParent    int
-		receiveTotal         int
-		receiveWithAppParent int
-		multiSpanTraces      int
+		totalSpans            int
+		processWithParent     int
+		processTotal          int
+		receiveWithParent     int
+		receiveTotal          int
+		receiveWithAppParent  int
+		receiveWithHTTPParent int // actor.doReceive with GET /echo or GET /ask as parent
+		multiSpanTraces       int
 	)
 
 	for _, t := range traces {
 		spanByID := make(map[string]span, len(t.Spans))
 		for _, s := range t.Spans {
 			spanByID[s.SpanID] = s
-			if s.OperationName == "send-tell" || s.OperationName == "send-ask" {
+			if _, ok := appSpanNames[s.OperationName]; ok {
 				appSpanNames[s.OperationName] = true
 			}
 		}
@@ -111,14 +117,21 @@ func main() {
 					receiveWithParent++
 				}
 				if hasParent {
+				refLoop:
 					for _, ref := range s.References {
 						if ref.RefType != "CHILD_OF" || ref.SpanID == "" {
 							continue
 						}
-						if parent, ok := spanByID[ref.SpanID]; ok &&
-							(parent.OperationName == "send-tell" || parent.OperationName == "send-ask") {
-							receiveWithAppParent++
-							break
+						if parent, ok := spanByID[ref.SpanID]; ok {
+							switch parent.OperationName {
+							case "send-tell", "send-ask":
+								receiveWithAppParent++
+								break refLoop
+							case "GET /echo", "GET /ask":
+								receiveWithAppParent++
+								receiveWithHTTPParent++
+								break refLoop
+							}
 						}
 					}
 				}
@@ -153,18 +166,24 @@ func main() {
 		}
 	}
 	if !appSpanFound {
-		fatal("no app spans (send-tell/send-ask) found in traces")
+		fatal("no app spans (send-tell, send-ask, GET /echo, GET /ask) found in traces")
 	}
 
 	if receiveTotal > 0 && receiveWithAppParent == 0 {
-		fatal("no actor.doReceive spans have app span (send-tell/send-ask) as parent — context propagation (Layout C) may be broken")
+		fatal("no actor.doReceive spans have app span as parent — context propagation (Layout C) may be broken")
+	}
+
+	httpSpanFound := appSpanNames["GET /echo"] || appSpanNames["GET /ask"]
+	if httpSpanFound && receiveWithHTTPParent == 0 {
+		fatal("HTTP spans (GET /echo, GET /ask) found but no actor.doReceive has them as parent — otelhttp+Layout C propagation broken")
 	}
 
 	fmt.Printf("assert-jaeger-traces: OK\n")
 	fmt.Printf("  traces: %d (%d with multiple spans)\n", len(traces), multiSpanTraces)
 	fmt.Printf("  total spans: %d\n", totalSpans)
 	fmt.Printf("  actor.process: %d/%d with parent\n", processWithParent, processTotal)
-	fmt.Printf("  actor.doReceive: %d/%d with parent (%d with app span parent)\n", receiveWithParent, receiveTotal, receiveWithAppParent)
+	fmt.Printf("  actor.doReceive: %d/%d with parent (%d with app span parent, %d with HTTP parent)\n",
+		receiveWithParent, receiveTotal, receiveWithAppParent, receiveWithHTTPParent)
 }
 
 func hasChildOfRef(s span) bool {

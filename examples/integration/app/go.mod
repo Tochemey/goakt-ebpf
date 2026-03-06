@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/tochemey/goakt/v4 v4.0.0-20260304120627-2c1b6969e327
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.66.0
 	go.opentelemetry.io/otel v1.41.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.41.0
 	go.opentelemetry.io/otel/sdk v1.41.0
@@ -20,6 +21,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/flowchartsman/retry v1.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect

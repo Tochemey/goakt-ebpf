@@ -35,6 +35,9 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_SERVICE_NAME: integration-app
+      HTTP_PORT: 8080
+    ports:
+      - "8080:8080" # HTTP server for otelhttp validation (curl localhost:8080/echo, /ask)
     depends_on:
       - otel-collector
     networks:
