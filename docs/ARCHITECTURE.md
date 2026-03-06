@@ -36,9 +36,11 @@ goakt-ebpf is a standalone eBPF agent that instruments [GoAkt](https://github.co
 ## Data Flow
 
 1. **Attach**: Agent resolves target PID, loads eBPF programs, attaches uprobes to GoAkt symbols.
-2. **Capture**: On function entry, eBPF allocates a span slot (keyed by goroutine ID), records start time, generates span/trace IDs.
-3. **Correlate**: On function return (or `handleReceivedError` for failure), eBPF records end time and outputs the span via perf buffer.
-4. **Export**: Userspace reads perf events, converts to OTLP spans, exports to configured endpoint (e.g. OTel Collector, Jaeger).
+2. **Capture**: On function entry, eBPF allocates a span slot (keyed by goroutine ID), records start time, generates span/trace IDs. On function return (or `handleReceivedError` for failure), eBPF records end time and outputs the span via perf buffer.
+3. **Correlate (Go-side)**: For each perf event, the span processor resolves parent context through two mechanisms:
+   - **Userspace context reading**: When `context_ptr` is non-zero, reads the target process memory via `process_vm_readv(2)` to extract an OTEL span from the app's `context.Context` chain. Overrides the BPF-assigned TraceID/ParentSpanID with the app's values.
+   - **Event buffering**: `process`/`grainProcess` events arrive before their parent `doReceive` (inner function returns first). These are buffered until the parent is processed and resolves its TraceID, then emitted together with the corrected TraceID.
+4. **Export**: Converts events to OTLP spans and exports to configured endpoint (e.g. OTel Collector, Jaeger).
 
 ## Probe Model
 
@@ -90,7 +92,7 @@ Full reference of probe targets, span names, and attributes:
 
 ## Trace Context Propagation
 
-goakt-ebpf runs as a separate process and attaches via uprobes. Without context propagation, every span starts a new trace and appears disconnected in Jaeger/Tempo. Three mechanisms connect spans into coherent traces:
+goakt-ebpf runs as a separate process and attaches via uprobes. Without context propagation, every span starts a new trace and appears disconnected in Jaeger/Tempo. Three mechanisms resolve parent context, and a Go-side event buffering step ensures consistent TraceIDs across the final output:
 
 ### In-Kernel Context Chain
 
@@ -108,9 +110,11 @@ This links spans that share a context (e.g. `actor.doReceive` as parent of neste
 
 ### Goroutine-Scoped Span Map
 
-A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propagates context within the same goroutine. On span start, the map is updated; on span end, the entry is deleted. Lookup tries this map first, then falls back to the context chain.
+A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propagates context within the same goroutine. On span start, the map is updated; on span end, the entry is deleted. `get_parent_span_context_goid_first` tries the context chain first, then falls back to this map.
 
-This links `actor.process` as a child of `actor.doReceive` since they run on the same goroutine. It does not connect spans across goroutines (e.g. remoting goroutine to actor goroutine).
+This gives `actor.process` a BPF-level parent link to `actor.doReceive` (both run on the same goroutine). However, the BPF-assigned TraceID may differ from the app's TraceID because `doReceive`'s TraceID is overridden later by userspace context extraction. The Go-side event buffering in `makeProcessFn` resolves this: `process` events are buffered until the parent `doReceive` event is processed, then emitted with the corrected TraceID (see [Event Buffering](#event-buffering)).
+
+The goid map does not connect spans across goroutines (e.g. remoting goroutine to actor goroutine).
 
 ### Userspace Context Reading
 
@@ -160,7 +164,7 @@ offset 192  size  64   spanContext trace.SpanContext  <- current span's own cont
 ```
 
 **When it appears:** `tracer.Start(ctx, "name")` with a sampled `TracerProvider` — this is what `otelhttp`, `otelgrpc`, and all standard instrumentation libraries create. **This is the most common layout for HTTP and gRPC parent spans.**  
-**Heuristic:** bytes `[0:24]` == zero (embedded + unlocked mutex); valid sampled TraceID/SpanID at offsets 192/208.  
+**Heuristic:** bytes `[0:16]` == zero (embedded.Span); bytes `[16:24]` (mutex) are **not** checked — the mutex can be locked during an active HTTP/gRPC handler, which is normal. Valid sampled TraceID/SpanID at offsets 192/208.  
 **Key insight:** `parent` at offset 24 holds the *caller's* span context (used when building the trace tree on export). `spanContext` at offset 192 is the *current* span's own ID, which goakt-ebpf needs as the parent for actor spans. Reading at the wrong offset (16 or 24) yields the mutex or partial parent TraceID — not the current span.
 
 #### Layout D — `*auto/sdk.span` (go.opentelemetry.io/auto/sdk) — Not Supported
@@ -189,6 +193,31 @@ This connects goakt-ebpf spans to application-level OTEL spans (HTTP, gRPC, manu
 - Span struct layouts are empirically validated against `go.opentelemetry.io/otel v1.41.0` and `go.opentelemetry.io/auto/sdk v1.2.1`. Offsets are recorded in `internal/inject/offset_results.json`.
 - Auto SDK parent extraction requires eBPF-level probes (not supported via the userspace reader).
 - Requires `CAP_SYS_PTRACE` (already required for uprobes).
+
+### Event Buffering
+
+In GoAkt, `process()` is called from within `doReceive()`. Because `process` returns first (inner function), BPF emits events in this order:
+
+1. `actor.process` event (inner return)
+2. `actor.doReceive` event (outer return)
+
+When `doReceive` is processed Go-side, userspace context extraction overrides its TraceID with the app's TraceID. But by then, `actor.process` would already have been emitted with the stale BPF-assigned TraceID — placing it in a different trace.
+
+`makeProcessFn` in `probe.go` solves this by buffering `process`/`grainProcess` events that have a BPF parent (from the goid map) but no context pointer (`context_pos=0`). When the parent `doReceive` event arrives and resolves the correct TraceID via userspace extraction, the buffered child is fixed up and emitted together:
+
+```
+Event arrival:
+  1. process event (BPF parent = doReceive SpanID) → buffered
+  2. doReceive event (context_ptr set)             → userspace extraction → app TraceID
+     └── resolves buffered process                 → override TraceID → emit both
+
+Result:
+  app_span (app TraceID)
+    └── actor.doReceive (app TraceID, parent = app_span)
+          └── actor.process (app TraceID, parent = doReceive)
+```
+
+The buffer is bounded (`maxPending = 256`) with `clear` on overflow. Events are processed serially in `SpanProducer.Run`, so no locking is needed. If `doReceive` never arrives (e.g. probe failure), buffered process events are silently dropped on overflow.
 
 ### Context Extraction by Method
 
