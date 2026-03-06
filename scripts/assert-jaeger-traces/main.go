@@ -52,6 +52,7 @@ var manualSpanNames = map[string]bool{
 	"send-tell": true, "send-ask": true,
 }
 
+// gocyclo:ignore
 func main() {
 	baseURL := strings.TrimSuffix(envOr("JAEGER_QUERY_URL", "http://localhost:16686"), "/")
 	service := envOr("JAEGER_SERVICE", "goakt-ebpf")
