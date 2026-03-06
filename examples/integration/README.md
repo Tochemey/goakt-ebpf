@@ -134,6 +134,8 @@ docker compose -f examples/integration/docker-compose.yml up --build
 
 The app sends Tell and Ask messages every 5 seconds (so the agent, which attaches after ~3s, can capture them). It also runs an HTTP server on port 8080 — curl `http://localhost:8080/echo` and `http://localhost:8080/ask` to generate otelhttp spans. Spans should appear within 10–15 seconds.
 
+**Validate span connections in stdout:** Set `OTEL_TRACES_STDOUT=1` for the app and/or agent to log spans (with TraceID, SpanID, ParentSpanID) to stdout for validating parent-child relationships.
+
 **No services in Jaeger?** Run `make diagnose` to check DOCKER_HOST and agent logs. See [Troubleshooting](#troubleshooting).
 
 ### Trace validation (CI)

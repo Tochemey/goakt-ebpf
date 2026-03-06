@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -129,7 +130,7 @@ func sendMessages(ctx context.Context, tracer trace.Tracer, echo, pong *actor.PI
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
-	exporter, err := otlptracehttp.New(ctx)
+	otlpExporter, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP exporter: %w", err)
 	}
@@ -141,10 +142,21 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 		return nil, fmt.Errorf("create resource: %w", err)
 	}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+	opts := []sdktrace.TracerProviderOption{
+		sdktrace.WithBatcher(otlpExporter),
 		sdktrace.WithResource(res),
-	)
+	}
+
+	// Log spans to stdout when OTEL_TRACES_STDOUT=1 for validating parent-child connections.
+	if os.Getenv("OTEL_TRACES_STDOUT") == "1" {
+		stdoutExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+		if err != nil {
+			return nil, fmt.Errorf("create stdout exporter: %w", err)
+		}
+		opts = append(opts, sdktrace.WithBatcher(stdoutExp))
+	}
+
+	tp := sdktrace.NewTracerProvider(opts...)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
