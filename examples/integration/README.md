@@ -132,7 +132,9 @@ docker compose -f examples/integration/docker-compose.yml up --build
 2. Select service `goakt-ebpf`
 3. Click **Find Traces**
 
-The app sends Tell and Ask messages every 5 seconds (so the agent, which attaches after ~3s, can capture them). Spans should appear within 10–15 seconds.
+The app sends Tell and Ask messages every 5 seconds (so the agent, which attaches after ~3s, can capture them). It also runs an HTTP server on port 8080 — curl `http://localhost:8080/echo` and `http://localhost:8080/ask` to generate otelhttp spans. Spans should appear within 10–15 seconds.
+
+**Validate span connections in stdout:** Set `OTEL_TRACES_STDOUT=1` for the app and/or agent to log spans (with TraceID, SpanID, ParentSpanID) to stdout for validating parent-child relationships.
 
 **No services in Jaeger?** Run `make diagnose` to check DOCKER_HOST and agent logs. See [Troubleshooting](#troubleshooting).
 
@@ -141,10 +143,11 @@ The app sends Tell and Ask messages every 5 seconds (so the agent, which attache
 The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger:
 
 - **Expected span names:** `actor.doReceive`, `actor.process` (from Tell/Ask and message handling; `actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
-- **App span names:** At least one of `send-tell` or `send-ask` (manual spans created by the integration app)
+- **App span names:** At least one of `send-tell`, `send-ask` (manual), or `GET /echo`, `GET /ask` (otelhttp)
 - **Minimum span count:** ≥ 4 spans across all traces
 - **Parent propagation:** Spans with `CHILD_OF` references have their parent span present in the same trace
-- **Layout C assertion:** At least one `actor.doReceive` span must have an app span (`send-tell` or `send-ask`) as its parent — validates that the userspace context reader correctly extracts parent span context from `*sdk/trace.recordingSpan`
+- **Layout C assertion:** At least one `actor.doReceive` span must have an app span as parent — validates that the userspace context reader correctly extracts parent span context from `*sdk/trace.recordingSpan` (manual and otelhttp paths)
+- **HTTP assertion:** If `GET /echo` or `GET /ask` spans exist, at least one `actor.doReceive` must have them as parent — validates otelhttp + Layout C (span-in-use/mutex) propagation
 
 Set `JAEGER_QUERY_URL` (default `http://localhost:16686`) and `JAEGER_SERVICE` (default `goakt-ebpf`) to override.
 

@@ -98,6 +98,12 @@ func ExtractSpanContextFromContext(pid int, ctxDataPtr uint64, logger *slog.Logg
 				}
 				return sc
 			}
+			if debugContextReader {
+				logger.Debug("context node had value but no span layout matched",
+					"nodes_visited", depth+1,
+					"val_addr", valData,
+				)
+			}
 		}
 
 		nodePtr = parentPtr
@@ -112,21 +118,24 @@ func tryReadSpanContext(pid int, addr uint64, buf []byte, logger *slog.Logger) *
 		return nil
 	}
 
+	// All OTEL span structs start with embedded.Span (16 zero bytes).
+	// Reject non-span objects early to avoid false positives at Layout C offsets.
 	if !isZero(buf[0:16]) {
 		return nil
 	}
 
-	if isZero(buf[16:24]) {
-		if sc := extractSpanContext(buf, layoutCTraceIDOff, layoutCSpanIDOff, layoutCFlagsOff); sc != nil {
-			if debugContextReader {
-				logger.Debug("matched span layout C (sdk/trace.recordingSpan)",
-					"trace_id", sc.TraceID(),
-					"span_id", sc.SpanID(),
-					"addr", addr,
-				)
-			}
-			return sc
+	// Try Layout C (recordingSpan) first — most common for otelhttp/otelgrpc.
+	// Do not require buf[16:24] (mutex) to be zero: when the span is in use,
+	// the mutex can be locked, which is normal for active HTTP/gRPC spans.
+	if sc := extractSpanContext(buf, layoutCTraceIDOff, layoutCSpanIDOff, layoutCFlagsOff); sc != nil {
+		if debugContextReader {
+			logger.Debug("matched span layout C (sdk/trace.recordingSpan)",
+				"trace_id", sc.TraceID(),
+				"span_id", sc.SpanID(),
+				"addr", addr,
+			)
 		}
+		return sc
 	}
 
 	if !isZero(buf[16:24]) {

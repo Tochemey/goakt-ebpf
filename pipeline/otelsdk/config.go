@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -290,14 +291,21 @@ func (c config) Logger() *slog.Logger {
 }
 
 func (c config) TracerProvider() *sdk.TracerProvider {
-	return sdk.NewTracerProvider(
+	opts := []sdk.TracerProviderOption{
 		// Sample everything. The actual sampling is done in the eBPF probes
 		// before it reaches this tracerProvider.
 		sdk.WithSampler(sdk.AlwaysSample()),
 		sdk.WithResource(c.resource()),
 		sdk.WithSpanProcessor(c.spanProcessor),
 		sdk.WithIDGenerator(c.idGenerator),
-	)
+	}
+	// Log spans to stdout when OTEL_TRACES_STDOUT=1 for validating parent-child connections.
+	if os.Getenv("OTEL_TRACES_STDOUT") == "1" {
+		if stdoutExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint()); err == nil {
+			opts = append(opts, sdk.WithSpanProcessor(sdk.NewBatchSpanProcessor(stdoutExp)))
+		}
+	}
+	return sdk.NewTracerProvider(opts...)
 }
 
 func (c config) resource() *resource.Resource {

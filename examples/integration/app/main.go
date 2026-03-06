@@ -4,19 +4,27 @@
 // Integration test app for goakt-ebpf trace context propagation.
 // Creates application-level OTEL spans around Tell/Ask so the eBPF agent
 // can link actor spans (doReceive, process) as children of these app spans.
+//
+// Two span sources validate context propagation:
+//  1. Manual tracer.Start (send-tell, send-ask) — periodic ticker
+//  2. otelhttp middleware (GET /echo, GET /ask) — HTTP handlers
 package main
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -61,6 +69,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start HTTP server with otelhttp — validates Layout C extraction from
+	// recordingSpan created by HTTP middleware (same path as real services).
+	port := envInt("HTTP_PORT", 8080)
+	mux := http.NewServeMux()
+	mux.Handle("/echo", otelhttp.NewHandler(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			actor.Tell(r.Context(), echo, "hello")
+			w.WriteHeader(http.StatusOK)
+		}), "GET /echo"))
+	mux.Handle("/ask", otelhttp.NewHandler(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := actor.Ask(r.Context(), pong, "ping", 2*time.Second); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}), "GET /ask"))
+	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: mux}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintln(os.Stderr, "HTTP server:", err)
+		}
+	}()
+	defer func() { _ = srv.Shutdown(context.Background()) }()
+
 	sendMessages(ctx, tracer, echo, pong)
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -73,6 +106,15 @@ func main() {
 			sendMessages(ctx, tracer, echo, pong)
 		}
 	}
+}
+
+func envInt(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return defaultVal
 }
 
 func sendMessages(ctx context.Context, tracer trace.Tracer, echo, pong *actor.PID) {
@@ -88,7 +130,7 @@ func sendMessages(ctx context.Context, tracer trace.Tracer, echo, pong *actor.PI
 }
 
 func initTracer(ctx context.Context) (func(context.Context) error, error) {
-	exporter, err := otlptracehttp.New(ctx)
+	otlpExporter, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP exporter: %w", err)
 	}
@@ -100,10 +142,21 @@ func initTracer(ctx context.Context) (func(context.Context) error, error) {
 		return nil, fmt.Errorf("create resource: %w", err)
 	}
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+	opts := []sdktrace.TracerProviderOption{
+		sdktrace.WithBatcher(otlpExporter),
 		sdktrace.WithResource(res),
-	)
+	}
+
+	// Log spans to stdout when OTEL_TRACES_STDOUT=1 for validating parent-child connections.
+	if os.Getenv("OTEL_TRACES_STDOUT") == "1" {
+		stdoutExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+		if err != nil {
+			return nil, fmt.Errorf("create stdout exporter: %w", err)
+		}
+		opts = append(opts, sdktrace.WithBatcher(stdoutExp))
+	}
+
+	tp := sdktrace.NewTracerProvider(opts...)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 

@@ -47,6 +47,9 @@ linters:
       - std-error-handling
     rules:
       - linters:
+          - gocyclo
+        path: scripts/
+      - linters:
           - revive
         path: _test\.go
         text: context.Context should be the first parameter of a function

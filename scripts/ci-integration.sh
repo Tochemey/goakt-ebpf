@@ -22,7 +22,7 @@ sleep 5
 
 echo "=== Building integration app ==="
 cd examples/integration/app
-go build -o /tmp/integration-app .
+go build -mod=mod -o /tmp/integration-app .
 cd "$ROOT"
 
 echo "=== Installing BPF tools and generating ==="
@@ -36,9 +36,12 @@ echo "=== Building goakt-ebpf agent ==="
 go build -o /tmp/goakt-ebpf ./cmd/cli/...
 
 echo "=== Starting integration app in background ==="
+HTTP_PORT=8080
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
 OTEL_SERVICE_NAME=integration-app \
+OTEL_TRACES_STDOUT=1 \
+HTTP_PORT=$HTTP_PORT \
 /tmp/integration-app &
 APP_PID=$!
 sleep 3
@@ -49,11 +52,24 @@ sudo env \
   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SERVICE_NAME=goakt-ebpf \
+  OTEL_TRACES_STDOUT=1 \
+  GOAKT_EBPF_DEBUG_CONTEXT_READER=1 \
+  GOAKT_EBPF_LOG_LEVEL=debug \
   /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
 
-echo "=== Waiting for traces (60s) ==="
-sleep 60
+echo "=== Waiting for agent to attach (5s) ==="
+sleep 5
+
+echo "=== Triggering HTTP requests (otelhttp + Layout C validation) ==="
+for i in 1 2 3 4 5; do
+  curl -sf "http://localhost:$HTTP_PORT/echo" >/dev/null || true
+  curl -sf "http://localhost:$HTTP_PORT/ask" >/dev/null || true
+  sleep 1
+done
+
+echo "=== Waiting for traces (55s) ==="
+sleep 55
 
 echo "=== Verifying traces in Jaeger ==="
 SERVICES=$(curl -sf "http://localhost:16686/api/services" 2>/dev/null || echo '{"data":[]}')

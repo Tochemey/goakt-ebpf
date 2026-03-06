@@ -8,119 +8,156 @@
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main)](https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l)](https://codecov.io/gh/Tochemey/goakt-ebpf)
 
-> **⚠️ Notice:** Development of this implementation has been **halted** due to assessment of the internals of OpenTelemetry and possible breaking changes in OpenTelemetry.
+Zero-instrumentation tracing agent for [GoAkt](https://github.com/tochemey/goakt) actor systems.
+Attach to any running GoAkt v4 application and get full actor-level traces — no code changes, no redeployment, no SDK dependency in your app.
 
-eBPF tracing agent for [GoAkt](https://github.com/tochemey/goakt) — zero-instrumentation tracing of actor message flow, remoting, and grains.
+## How It Works
 
-## 📖 Overview
+goakt-ebpf runs as a sidecar process next to your GoAkt application. It uses [eBPF](https://ebpf.io/) uprobes to observe actor message handling at runtime and exports traces via [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otlp/) to any compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.).
 
-goakt-ebpf attaches to running GoAkt applications and observes actor message handling, remote Tell/Ask, and grain processing without any code changes or redeployment. The agent runs as a sidecar process and exports traces via OpenTelemetry Protocol (OTLP), so you can visualize spans in Jaeger, Grafana Tempo, or any OTLP-compatible backend.
+```
+Your GoAkt app          goakt-ebpf agent         OTLP backend
+ ┌────────────┐          ┌────────────┐          ┌──────────┐
+ │ actor.Tell │◄─uprobe──│  captures  │ ──OTLP──▶│  Jaeger  │
+ │ actor.Ask  │          │  spans     │          │  Tempo   │
+ │ doReceive  │          │            │          │  etc.    │
+ └────────────┘          └────────────┘          └──────────┘
+      (no changes)        (sidecar process)
+```
 
-## 💡 What is eBPF?
+**Your application does not need any OpenTelemetry SDK, any tracing library, or any code changes.** The agent produces complete actor traces on its own.
 
-**eBPF** is a Linux kernel technology that lets us observe your GoAkt application at runtime without modifying your code. The agent attaches to your process and captures actor activity as it happens — safe, low-overhead, and fully transparent. For implementation details, see [Architecture](docs/ARCHITECTURE.md).
+## Connecting App Spans to Actor Spans
 
-## 📡 OpenTelemetry Integration
+If your application already uses the **standard OpenTelemetry Go SDK** (`go.opentelemetry.io/otel/sdk`) to create spans — from HTTP handlers, gRPC interceptors, or manual `tracer.Start` calls — goakt-ebpf automatically links its actor spans as children of your application spans.
 
-goakt-ebpf is built for the OpenTelemetry ecosystem. The agent:
+This gives you a connected trace tree like:
 
-- **Produces OTLP traces** — Spans follow the OpenTelemetry trace model and are exported over HTTP or gRPC.
-- **Uses standard OTLP exporters** — Configure `OTEL_EXPORTER_OTLP_ENDPOINT` to send traces to any OTLP receiver (OpenTelemetry Collector, Jaeger, Grafana Tempo, Honeycomb, etc.).
-- **Correlates with GoAkt** — When GoAkt is configured with TraceContext propagation, the agent’s spans can be linked to cross-node traces.
+```
+GET /api/order                    ← your app span (otelhttp / otelgrpc)
+  └── actor.doReceive             ← goakt-ebpf span (auto-linked)
+        └── actor.process         ← goakt-ebpf span (auto-linked)
+```
 
-You run the agent alongside your GoAkt app, point it at an OTLP endpoint, and traces appear in your observability platform. No SDK changes or instrumentation in your application.
+**What you need for this to work:**
 
-## 📋 Prerequisites
+1. Use the standard OTEL SDK: `sdktrace.NewTracerProvider(...)` with a sampled exporter.
+2. Set it globally: `otel.SetTracerProvider(tp)`.
+3. Instrument your entry points (HTTP handlers, gRPC interceptors, etc.) so spans exist in `context.Context`.
+4. **Pass that context into actor calls**: `actor.Tell(ctx, pid, msg)`, `actor.Ask(ctx, pid, msg)`, etc.
 
-- **Linux** — eBPF is a Linux kernel feature. The agent does not run on macOS or Windows (Docker Desktop’s Linux VM typically does not support eBPF).
-- **Go 1.26+** — For building from source.
+If any of these steps is missing, actor spans still appear — they just won't be linked to your app spans (they appear as root spans).
 
-## ✨ Features
+**Not supported:** The OpenTelemetry Auto SDK (`go.opentelemetry.io/auto/sdk`) cannot be used for parent-child linking because its span context is zero-initialized in user-space.
 
-- **Zero instrumentation** — No code changes, no redeployment. Attach to any GoAkt v4 process.
-- **Actor-level spans** — Traces for `doReceive`, `process`, remote Tell/Ask, and grain handling.
-- **OTLP export** — Standard OpenTelemetry Protocol; works with any OTLP backend.
-- **Sidecar deployment** — Runs as a separate process; share PID namespace with the target in Docker/Kubernetes.
-- **Cross-node correlation** — Integrates with GoAkt’s TraceContext propagation for distributed traces.
+## Prerequisites
 
-## 🚀 Quick Start
+- **Linux** — eBPF is a Linux kernel feature. The agent does not run on macOS or Windows. Docker Desktop's VM typically does not support eBPF; use [Lima](https://github.com/lima-vm/lima) on macOS instead (see [integration example](examples/integration/README.md)).
+- **Non-stripped binary** — The target Go binary must retain DWARF debug info (do not build with `-ldflags="-s -w"`).
+- **GoAkt v4** — Instrumented symbols match GoAkt v4.
 
-The agent is distributed as a Docker image. Pull and run it, sharing the PID namespace with your GoAkt application:
+## Quick Start
+
+### Docker (recommended)
+
+Pull the agent image and run it alongside your GoAkt app, sharing the PID namespace:
 
 ```bash
-# Pull from GitHub Container Registry
-docker pull ghcr.io/tochemey/goakt-ebpf:latest
-
-# Run (share PID namespace with target container)
 docker run --rm \
   --cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON \
-  --pid=container:YOUR_GOAKT_APP_CONTAINER \
+  --pid=container:YOUR_GOAKT_APP \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
   ghcr.io/tochemey/goakt-ebpf:latest -pid 1
 ```
 
-When sharing PID namespace with a container, the target process is typically PID 1. See [Deployment](#-deployment) for Kubernetes and other environments.
+When sharing PID namespace, the target process is typically PID 1.
 
-## ⚙️ Configuration
+### Bare metal
+
+Build from source or extract from the Docker image, then run with the target PID:
+
+```bash
+# Option 1: Build from source (Linux only)
+go build -o goakt-ebpf ./cmd/cli/...
+
+# Option 2: Extract from Docker image
+docker run --rm --entrypoint cat ghcr.io/tochemey/goakt-ebpf:latest \
+  /usr/local/bin/goakt-ebpf > goakt-ebpf && chmod +x goakt-ebpf
+
+# Run
+sudo ./goakt-ebpf -pid $(pgrep -f your-goakt-app)
+# or
+sudo ./goakt-ebpf -exe /path/to/your-goakt-app
+```
+
+### Try it locally
+
+Run the full integration example with Docker Compose:
+
+```bash
+make build && make start && make view   # opens Jaeger UI
+```
+
+Or: `docker compose -f examples/integration/docker-compose.yml up --build`, then open http://localhost:16686.
+
+See [examples/integration/README.md](examples/integration/README.md) for Lima setup on macOS.
+
+## Configuration
 
 ### Flags
 
-| Flag                 | Description                                                                      |
-|----------------------|----------------------------------------------------------------------------------|
-| `-pid <pid>`         | Target process ID. Use `1` when sharing PID namespace with the target container. |
-| `-exe <path>`        | Target executable path; finds PID by matching `/proc/<pid>/exe`.                 |
-| `-log-level <level>` | Log verbosity: `debug`, `info`, `warn`, `error` (default: `info`).               |
+| Flag                 | Description                                                        |
+|----------------------|--------------------------------------------------------------------|
+| `-pid <pid>`         | Target process ID. Use `1` when sharing PID namespace.             |
+| `-exe <path>`        | Target executable path; finds PID by matching `/proc/<pid>/exe`.   |
+| `-log-level <level>` | Log verbosity: `debug`, `info`, `warn`, `error` (default: `info`). |
 
 ### Environment Variables
 
-| Variable                      | Description                                           |
-|-------------------------------|-------------------------------------------------------|
-| `GOAKT_EBPF_TARGET_PID`       | Target PID (used if `-pid` is not set).               |
-| `GOAKT_EBPF_LOG_LEVEL`        | Log level (overridden by `-log-level`).               |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint (e.g. `http://otel-collector:4318`).    |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` or `grpc` (default: `http/protobuf`). |
+| Variable                          | Description                                                       |
+|-----------------------------------|-------------------------------------------------------------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT`     | OTLP endpoint (e.g. `http://otel-collector:4318`).                |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`     | `http/protobuf` or `grpc` (default: `http/protobuf`).             |
+| `OTEL_SERVICE_NAME`               | Service name for exported traces (default: `goakt-ebpf`).         |
+| `GOAKT_EBPF_TARGET_PID`           | Target PID (used if `-pid` is not set).                           |
+| `GOAKT_EBPF_LOG_LEVEL`            | Log level (overridden by `-log-level`).                           |
+| `GOAKT_EBPF_DEBUG_CONTEXT_READER` | Set to `1` to log context chain walking and span layout matching. |
 
-Spans are exported via OTLP. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` to point to your OpenTelemetry Collector, Jaeger, or other OTLP receiver.
+## What You See in Traces
 
-## 🔧 Build (from source)
+The agent produces spans for all actor operations without any code changes:
 
-For local development only. The agent is distributed as a Docker image.
+| Category             | Spans                                                                                                          | Description                                                                |
+|----------------------|----------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
+| **Message handling** | `actor.doReceive`, `actor.process`                                                                             | When actors receive and process messages, with timing and success/failure. |
+| **Grain processing** | `actor.grainDoReceive`, `actor.grainProcess`                                                                   | Grain message handling and lifecycle.                                      |
+| **Remote messaging** | `actor.remoteTell`, `actor.remoteAsk`, `actor.remoteTellReceive`, `actor.remoteAskReceive`                     | Sends and receives across nodes.                                           |
+| **Remote grains**    | `actor.remoteTellGrain`, `actor.remoteAskGrain`, `actor.remoteTellGrainReceive`, `actor.remoteAskGrainReceive` | Cross-node grain operations.                                               |
+| **Actor lifecycle**  | `actor.systemSpawn`, `actor.spawnChild`, `actor.spawnOn`                                                       | Local actor creation.                                                      |
+| **Remote lifecycle** | `actor.remoteSpawn`, `actor.remoteSpawnChild`, `actor.remoteStop`, `actor.remoteReSpawn`, `actor.relocation`   | Remote actor management.                                                   |
+| **Remote metadata**  | `actor.remoteLookup`, `actor.remoteState`, `actor.remoteKind`, `actor.remoteMetric`, ...                       | Inspection and management operations.                                      |
 
-```bash
-go mod tidy
-# On non-Linux: ./scripts/generate-bpf.sh (uses Docker)
-go build -o goakt-ebpf ./cmd/cli/...
-```
+## Deployment
 
-## 🧪 Integration Example
+### Docker Compose
 
-Run the full stack locally to verify the agent:
+```yaml
+services:
+  goakt-app:
+    image: your-goakt-app:latest
 
-```bash
-make build
-make start
-make view     # Opens Jaeger UI
-```
-
-Or: `docker compose -f examples/integration/docker-compose.yml up --build`. **On macOS:** use [Lima](https://github.com/lima-vm/lima) instead of Docker Desktop (eBPF requires a Linux kernel). See [examples/integration/README.md](examples/integration/README.md) for step-by-step Lima setup.
-
-## 📦 Deployment
-
-### Docker
-
-Run the agent as a sidecar with your GoAkt app. The agent must share the PID namespace with the target so it can attach uprobes:
-
-```bash
-docker run --rm \
-  --cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON \
-  --pid=container:goakt-app \
-  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
-  ghcr.io/tochemey/goakt-ebpf:latest -pid 1
+  goakt-ebpf:
+    image: ghcr.io/tochemey/goakt-ebpf:latest
+    cap_add: [SYS_PTRACE, SYS_ADMIN, BPF, PERFMON]
+    pid: "container:goakt-app"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    entrypoint: ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]
 ```
 
 ### Kubernetes
 
-Run the agent as a sidecar in the same pod as your GoAkt application. Share the PID namespace via `shareProcessNamespace: true`:
+Run the agent as a sidecar in the same pod with shared PID namespace:
 
 ```yaml
 spec:
@@ -128,7 +165,6 @@ spec:
   containers:
     - name: goakt-app
       image: your-goakt-app:latest
-      # ...
     - name: goakt-ebpf
       image: ghcr.io/tochemey/goakt-ebpf:latest
       securityContext:
@@ -140,35 +176,9 @@ spec:
       args: ["-pid", "1"]
 ```
 
-### Bare Metal / Systemd
+## Distributed Tracing (Cross-Node)
 
-When the agent and GoAkt app run on the same Linux host, use `-pid` with the target process ID or `-exe` with the executable path.
-
-**Obtaining the executable** — Either build from source or extract from the Docker image:
-
-```bash
-# Option 1: Build from source (requires Linux; see Build section for non-Linux)
-go mod tidy
-# On non-Linux: ./scripts/generate-bpf.sh first
-go build -o goakt-ebpf ./cmd/cli/...
-
-# Option 2: Extract from Docker image (no build required)
-docker pull ghcr.io/tochemey/goakt-ebpf:latest
-docker run --rm --entrypoint cat ghcr.io/tochemey/goakt-ebpf:latest /usr/local/bin/goakt-ebpf > goakt-ebpf
-chmod +x goakt-ebpf
-```
-
-**Run the agent:**
-
-```bash
-./goakt-ebpf -pid $(pgrep -f your-goakt-app)
-# or
-./goakt-ebpf -exe /path/to/your-goakt-app
-```
-
-## 🔗 Distributed Tracing (Cross-Node)
-
-Configure GoAkt with OpenTelemetry's TraceContext propagator for cross-node correlation:
+For cross-node trace correlation, configure GoAkt with OpenTelemetry's TraceContext propagator:
 
 ```go
 import "go.opentelemetry.io/otel/propagation"
@@ -179,80 +189,36 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
 ))
 ```
 
-## 🧵 Parent Span Correlation
-
-goakt-ebpf reads the Go `context.Context` passed to actor operations at the uprobe site and extracts an OpenTelemetry span context from it. When found, actor spans become children of the application span — connecting HTTP, gRPC, or any other entry-point trace to your actor work.
-
-### Supported SDK and Span Types
-
-| SDK / Span type                                       | Layout | Supported                                                                       |
-|-------------------------------------------------------|--------|---------------------------------------------------------------------------------|
-| `go.opentelemetry.io/otel/trace.nonRecordingSpan`     | A      | Yes — remote-propagated contexts (W3C/B3)                                       |
-| `go.opentelemetry.io/otel/sdk/trace.recordingSpan`    | C      | Yes — sampled HTTP/gRPC/manual spans (most common)                              |
-| `go.opentelemetry.io/otel/sdk/trace.nonRecordingSpan` | B      | Filtered — not-sampled spans produce no parent link                             |
-| `go.opentelemetry.io/auto/sdk.span`                   | D      | Not supported — `spanContext` is zero in user-space; eBPF-level probes required |
-
-### Requirements for Parent-Child Correlation
-
-**Standard OTEL SDK** (`go.opentelemetry.io/otel/sdk`):
-
-1. Initialize a `TracerProvider` with a sampled exporter (`sdktrace.NewTracerProvider(...)`).
-2. Set it globally: `otel.SetTracerProvider(tp)`.
-3. Instrument entry points (HTTP handlers, gRPC interceptors, etc.) so spans are created and stored in `context.Context`.
-4. **Propagate that context into actor calls**: `goakt.Ask(ctx, pid, msg)`, `goakt.Tell(ctx, pid, msg)`, `actorSystem.Spawn(ctx, ...)`, etc.
-
-**Auto SDK** (`go.opentelemetry.io/auto/sdk`):
-
-The userspace context reader cannot extract parent context from Auto SDK spans because `spanContext` is zero-initialized in user-space. eBPF-level probes on `tracer.Start` are required (not yet implemented). Actor spans will appear as root spans when the application uses the Auto SDK.
-
-### Debugging Context Propagation
-
-Set `GOAKT_EBPF_DEBUG_CONTEXT_READER=1` to enable verbose logging that shows which span layout was matched and how many context chain nodes were visited:
+## Building from Source
 
 ```bash
-GOAKT_EBPF_DEBUG_CONTEXT_READER=1 ./goakt-ebpf -pid 1
+# Linux
+go mod tidy
+go generate ./internal/instrumentation/bpf/github.com/tochemey/goakt/actor/...
+go build -o goakt-ebpf ./cmd/cli/...
+
+# macOS / Windows (BPF generation requires Linux)
+make docker-generate   # runs go generate in a Docker container
+make docker-test       # runs generate + tests in Docker
 ```
 
-## 🎯 What You'll See in Traces
+## Troubleshooting
 
-goakt-ebpf gives you visibility into your GoAkt application without changing a single line of code. In Jaeger, Tempo, or any OTLP backend, you'll see spans for:
+| Issue                                  | Cause                                                     | Fix                                                                                                                                           |
+|----------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `operation not permitted`              | eBPF not supported (Docker Desktop, missing capabilities) | Run on Linux. Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON`. On macOS use [Lima](examples/integration/README.md).                          |
+| `could not find offset for function`   | Symbol missing (stripped binary, older GoAkt)             | Build without `-ldflags="-s -w"`. Optional probes log a warning and continue.                                                                 |
+| No spans in backend                    | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                             |
+| Actor spans are root spans (no parent) | Context not propagated, or Auto SDK used                  | Pass the HTTP/gRPC `ctx` into `actor.Tell`/`Ask`. Use the standard OTEL SDK, not Auto SDK. Enable debug: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
+| `bpf_x86_bpfel.o: no matching files`   | BPF objects not generated                                 | Run `make docker-generate` (macOS/Windows) or `go generate ./...` (Linux).                                                                    |
 
-- **Actor message handling** — When actors receive and process messages (`doReceive`), including timing and success/failure.
-- **Grain processing** — Grain message handling, activation, and lifecycle operations.
-- **Remote Tell & Ask** — Sends and receives across nodes: when messages leave your process and when they arrive.
-- **Remote grains** — Client-side grain calls (Tell/Ask) and server-side grain receives.
-- **Actor lifecycle** — Spawn (system and child), remote spawn, lookup, stop, respawn, and relocation.
-- **Remoting metadata** — Optional spans for passivation, state, children, parent, kind, dependencies, metrics, and stash size.
+## Documentation
 
-Spans include timestamps (received, handled, sent) and operation attributes so you can trace message flow end-to-end. For the complete symbol-level reference, see [Architecture](docs/ARCHITECTURE.md).
-
-## 🔄 How It Works
-
-The agent attaches to your GoAkt process, captures actor activity as it happens, and exports spans via OTLP. No code changes, no redeployment. For implementation details (attach, capture, correlate, export), see [Architecture](docs/ARCHITECTURE.md).
-
-## ✅ Compatibility
-
-- **GoAkt** — v4.x (instrumented symbols match GoAkt v4).
-- **Linux** — Required; eBPF is a Linux kernel feature. Docker Desktop on macOS/Windows uses a Linux VM that typically does not support eBPF; you may see `operation not permitted` when attaching to the target process.
-- **Non-stripped binaries** — The target Go binary must be built without `-ldflags="-s -w"` (or similar) so that DWARF debug info is available for symbol lookup.
-
-## 🔍 Troubleshooting
-
-| Issue                                        | Cause                                                     | Fix                                                                                                                                                                                                                                                        |
-|----------------------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `invalid PID 1: operation not permitted`     | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Run on a Linux host.                                                                                                                                                                                                                                       |
-| `could not find offset for function ...`     | Symbol missing (older GoAkt, stripped binary)             | Use non-stripped binary. Optional probes use FailureModeWarn.                                                                                                                                                                                              |
-| `permission denied`                          | eBPF requires capabilities                                | Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON` when running Docker.                                                                                                                                                                                      |
-| No spans in Jaeger                           | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                                                                                                                                          |
-| `bpf_x86_bpfel.o: no matching files`         | BPF not generated                                         | Run `./scripts/generate-bpf.sh` on macOS/Windows.                                                                                                                                                                                                          |
-| Actor spans appear as root spans (no parent) | Context not propagated, or Auto SDK used                  | (1) Pass the HTTP/gRPC handler `ctx` into `goakt.Tell`/`Ask`/`Spawn`. (2) Use the standard OTEL SDK (`sdktrace.NewTracerProvider`), not Auto SDK. (3) Confirm the `TracerProvider` is sampled. (4) Enable debug logs: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
-
-## 📚 Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
+- [Architecture](docs/ARCHITECTURE.md) — eBPF probe design, span layout heuristics, context extraction internals.
+- [Integration Example](examples/integration/README.md) — Full Docker Compose setup with Jaeger.
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 
-## 📄 License
+## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
