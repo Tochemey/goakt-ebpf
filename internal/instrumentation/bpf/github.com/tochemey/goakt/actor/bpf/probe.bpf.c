@@ -1436,7 +1436,7 @@ int uprobe_ActorOf_Returns(struct pt_regs *ctx) {
 }
 
 #define PROBE_ENTRY_RETURN(name, map, event_type) \
-SEC("uprobe/" name) \
+SEC("uprobe/" #name) \
 int uprobe_##name(struct pt_regs *ctx) { \
 	void *key = (void *)GOROUTINE(ctx); \
 	if (bpf_map_lookup_elem(&map, &key) != NULL) return 0; \
@@ -1446,7 +1446,7 @@ int uprobe_##name(struct pt_regs *ctx) { \
 	start_span_and_store(ctx, key, uprobe_data, event_type, &map, 2, 0, true); \
 	return 0; \
 } \
-SEC("uprobe/" name "_Returns") \
+SEC("uprobe/" #name "_Returns") \
 int uprobe_##name##_Returns(struct pt_regs *ctx) { \
 	void *key = (void *)GOROUTINE(ctx); \
 	finish_span_and_output(ctx, key, &map); \
@@ -1504,7 +1504,7 @@ int uprobe_actorSystem_Metric_Returns(struct pt_regs *ctx) {
 
 // --- (*PID) methods (same package, different receiver) ---
 #define PROBE_PID_ENTRY_RETURN(name, map, event_type) \
-SEC("uprobe/" name) \
+SEC("uprobe/" #name) \
 int uprobe_##name(struct pt_regs *ctx) { \
 	void *key = (void *)GOROUTINE(ctx); \
 	if (bpf_map_lookup_elem(&map, &key) != NULL) return 0; \
@@ -1514,7 +1514,7 @@ int uprobe_##name(struct pt_regs *ctx) { \
 	start_span_and_store(ctx, key, uprobe_data, event_type, &map, 2, 0, true); \
 	return 0; \
 } \
-SEC("uprobe/" name "_Returns") \
+SEC("uprobe/" #name "_Returns") \
 int uprobe_##name##_Returns(struct pt_regs *ctx) { \
 	void *key = (void *)GOROUTINE(ctx); \
 	finish_span_and_output(ctx, key, &map); \

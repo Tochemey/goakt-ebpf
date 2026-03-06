@@ -83,16 +83,74 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
+	UprobeActorExists                             *ebpf.ProgramSpec `ebpf:"uprobe_ActorExists"`
+	UprobeActorExistsReturns                      *ebpf.ProgramSpec `ebpf:"uprobe_ActorExists_Returns"`
 	UprobeActorOf                                 *ebpf.ProgramSpec `ebpf:"uprobe_ActorOf"`
 	UprobeActorOfReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_ActorOf_Returns"`
+	UprobeActors                                  *ebpf.ProgramSpec `ebpf:"uprobe_Actors"`
+	UprobeActorsReturns                           *ebpf.ProgramSpec `ebpf:"uprobe_Actors_Returns"`
+	UprobeAsk                                     *ebpf.ProgramSpec `ebpf:"uprobe_Ask"`
+	UprobeAskReturns                              *ebpf.ProgramSpec `ebpf:"uprobe_Ask_Returns"`
+	UprobeBatchAsk                                *ebpf.ProgramSpec `ebpf:"uprobe_BatchAsk"`
+	UprobeBatchAskReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_BatchAsk_Returns"`
+	UprobeBatchTell                               *ebpf.ProgramSpec `ebpf:"uprobe_BatchTell"`
+	UprobeBatchTellReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_BatchTell_Returns"`
+	UprobeDiscoverActor                           *ebpf.ProgramSpec `ebpf:"uprobe_DiscoverActor"`
+	UprobeDiscoverActorReturns                    *ebpf.ProgramSpec `ebpf:"uprobe_DiscoverActor_Returns"`
+	UprobeKill                                    *ebpf.ProgramSpec `ebpf:"uprobe_Kill"`
+	UprobeKillReturns                             *ebpf.ProgramSpec `ebpf:"uprobe_Kill_Returns"`
+	UprobePipeTo                                  *ebpf.ProgramSpec `ebpf:"uprobe_PipeTo"`
+	UprobePipeToName                              *ebpf.ProgramSpec `ebpf:"uprobe_PipeToName"`
+	UprobePipeToNameReturns                       *ebpf.ProgramSpec `ebpf:"uprobe_PipeToName_Returns"`
+	UprobePipeToReturns                           *ebpf.ProgramSpec `ebpf:"uprobe_PipeTo_Returns"`
+	UprobeReSpawn                                 *ebpf.ProgramSpec `ebpf:"uprobe_ReSpawn"`
+	UprobeReSpawnReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_ReSpawn_Returns"`
+	UprobeReinstateNamed                          *ebpf.ProgramSpec `ebpf:"uprobe_ReinstateNamed"`
+	UprobeReinstateNamedReturns                   *ebpf.ProgramSpec `ebpf:"uprobe_ReinstateNamed_Returns"`
 	UprobeRelocate                                *ebpf.ProgramSpec `ebpf:"uprobe_Relocate"`
 	UprobeRelocateReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_Relocate_Returns"`
+	UprobeRemoteLookup                            *ebpf.ProgramSpec `ebpf:"uprobe_RemoteLookup"`
+	UprobeRemoteLookupReturns                     *ebpf.ProgramSpec `ebpf:"uprobe_RemoteLookup_Returns"`
+	UprobeRemoteReSpawn                           *ebpf.ProgramSpec `ebpf:"uprobe_RemoteReSpawn"`
+	UprobeRemoteReSpawnReturns                    *ebpf.ProgramSpec `ebpf:"uprobe_RemoteReSpawn_Returns"`
+	UprobeRemoteStop                              *ebpf.ProgramSpec `ebpf:"uprobe_RemoteStop"`
+	UprobeRemoteStopReturns                       *ebpf.ProgramSpec `ebpf:"uprobe_RemoteStop_Returns"`
+	UprobeRestart                                 *ebpf.ProgramSpec `ebpf:"uprobe_Restart"`
+	UprobeRestartReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_Restart_Returns"`
+	UprobeSchedule                                *ebpf.ProgramSpec `ebpf:"uprobe_Schedule"`
+	UprobeScheduleOnce                            *ebpf.ProgramSpec `ebpf:"uprobe_ScheduleOnce"`
+	UprobeScheduleOnceReturns                     *ebpf.ProgramSpec `ebpf:"uprobe_ScheduleOnce_Returns"`
+	UprobeScheduleWithCron                        *ebpf.ProgramSpec `ebpf:"uprobe_ScheduleWithCron"`
+	UprobeScheduleWithCronReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_ScheduleWithCron_Returns"`
+	UprobeScheduleReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_Schedule_Returns"`
+	UprobeSendAsync                               *ebpf.ProgramSpec `ebpf:"uprobe_SendAsync"`
+	UprobeSendAsyncReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_SendAsync_Returns"`
+	UprobeSendSync                                *ebpf.ProgramSpec `ebpf:"uprobe_SendSync"`
+	UprobeSendSyncReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_SendSync_Returns"`
+	UprobeShutdown                                *ebpf.ProgramSpec `ebpf:"uprobe_Shutdown"`
+	UprobeShutdownReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_Shutdown_Returns"`
 	UprobeSpawn                                   *ebpf.ProgramSpec `ebpf:"uprobe_Spawn"`
 	UprobeSpawnChild                              *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild"`
 	UprobeSpawnChildReturns                       *ebpf.ProgramSpec `ebpf:"uprobe_SpawnChild_Returns"`
+	UprobeSpawnFromFunc                           *ebpf.ProgramSpec `ebpf:"uprobe_SpawnFromFunc"`
+	UprobeSpawnFromFuncReturns                    *ebpf.ProgramSpec `ebpf:"uprobe_SpawnFromFunc_Returns"`
+	UprobeSpawnNamedFromFunc                      *ebpf.ProgramSpec `ebpf:"uprobe_SpawnNamedFromFunc"`
+	UprobeSpawnNamedFromFuncReturns               *ebpf.ProgramSpec `ebpf:"uprobe_SpawnNamedFromFunc_Returns"`
 	UprobeSpawnOn                                 *ebpf.ProgramSpec `ebpf:"uprobe_SpawnOn"`
 	UprobeSpawnOnReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_SpawnOn_Returns"`
+	UprobeSpawnRouter                             *ebpf.ProgramSpec `ebpf:"uprobe_SpawnRouter"`
+	UprobeSpawnRouterReturns                      *ebpf.ProgramSpec `ebpf:"uprobe_SpawnRouter_Returns"`
+	UprobeSpawnSingleton                          *ebpf.ProgramSpec `ebpf:"uprobe_SpawnSingleton"`
+	UprobeSpawnSingletonReturns                   *ebpf.ProgramSpec `ebpf:"uprobe_SpawnSingleton_Returns"`
 	UprobeSpawnReturns                            *ebpf.ProgramSpec `ebpf:"uprobe_Spawn_Returns"`
+	UprobeStart                                   *ebpf.ProgramSpec `ebpf:"uprobe_Start"`
+	UprobeStartReturns                            *ebpf.ProgramSpec `ebpf:"uprobe_Start_Returns"`
+	UprobeTell                                    *ebpf.ProgramSpec `ebpf:"uprobe_Tell"`
+	UprobeTellReturns                             *ebpf.ProgramSpec `ebpf:"uprobe_Tell_Returns"`
+	UprobeActorSystemMetric                       *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Metric"`
+	UprobeActorSystemMetricReturns                *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Metric_Returns"`
+	UprobeActorSystemStop                         *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Stop"`
+	UprobeActorSystemStopReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Stop_Returns"`
 	UprobeDoReceive                               *ebpf.ProgramSpec `ebpf:"uprobe_doReceive"`
 	UprobeDoReceiveReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_doReceive_Returns"`
 	UprobeGrainPID_process                        *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process"`
@@ -104,6 +162,10 @@ type bpfProgramSpecs struct {
 	UprobeHandleRemoteAskReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk_Returns"`
 	UprobeHandleRemoteTell                        *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell"`
 	UprobeHandleRemoteTellReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell_Returns"`
+	UprobePidMetric                               *ebpf.ProgramSpec `ebpf:"uprobe_pid_Metric"`
+	UprobePidMetricReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_pid_Metric_Returns"`
+	UprobePidStop                                 *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop"`
+	UprobePidStopReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop_Returns"`
 	UprobeProcess                                 *ebpf.ProgramSpec `ebpf:"uprobe_process"`
 	UprobeProcessReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_process_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler"`
@@ -159,12 +221,28 @@ type bpfMapSpecs struct {
 	AllocMap                            *ebpf.MapSpec `ebpf:"alloc_map"`
 	Events                              *ebpf.MapSpec `ebpf:"events"`
 	GoContextToSc                       *ebpf.MapSpec `ebpf:"go_context_to_sc"`
+	GoaktActorActorExists               *ebpf.MapSpec `ebpf:"goakt_actor_actor_exists"`
 	GoaktActorActorOf                   *ebpf.MapSpec `ebpf:"goakt_actor_actor_of"`
+	GoaktActorActors                    *ebpf.MapSpec `ebpf:"goakt_actor_actors"`
+	GoaktActorAsk                       *ebpf.MapSpec `ebpf:"goakt_actor_ask"`
+	GoaktActorBatchAsk                  *ebpf.MapSpec `ebpf:"goakt_actor_batch_ask"`
+	GoaktActorBatchTell                 *ebpf.MapSpec `ebpf:"goakt_actor_batch_tell"`
+	GoaktActorDiscoverActor             *ebpf.MapSpec `ebpf:"goakt_actor_discover_actor"`
 	GoaktActorDoReceive                 *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
 	GoaktActorGoidToSpanContext         *ebpf.MapSpec `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.MapSpec `ebpf:"goakt_actor_grain_process"`
+	GoaktActorKill                      *ebpf.MapSpec `ebpf:"goakt_actor_kill"`
+	GoaktActorPidMetric                 *ebpf.MapSpec `ebpf:"goakt_actor_pid_metric"`
+	GoaktActorPidRemoteLookup           *ebpf.MapSpec `ebpf:"goakt_actor_pid_remote_lookup"`
+	GoaktActorPidRemoteReSpawn          *ebpf.MapSpec `ebpf:"goakt_actor_pid_remote_re_spawn"`
+	GoaktActorPidRemoteStop             *ebpf.MapSpec `ebpf:"goakt_actor_pid_remote_stop"`
+	GoaktActorPidStop                   *ebpf.MapSpec `ebpf:"goakt_actor_pid_stop"`
+	GoaktActorPipeTo                    *ebpf.MapSpec `ebpf:"goakt_actor_pipe_to"`
+	GoaktActorPipeToName                *ebpf.MapSpec `ebpf:"goakt_actor_pipe_to_name"`
 	GoaktActorProcess                   *ebpf.MapSpec `ebpf:"goakt_actor_process"`
+	GoaktActorReSpawn                   *ebpf.MapSpec `ebpf:"goakt_actor_re_spawn"`
+	GoaktActorReinstateNamed            *ebpf.MapSpec `ebpf:"goakt_actor_reinstate_named"`
 	GoaktActorRelocation                *ebpf.MapSpec `ebpf:"goakt_actor_relocation"`
 	GoaktActorRemoteActivateGrain       *ebpf.MapSpec `ebpf:"goakt_actor_remote_activate_grain"`
 	GoaktActorRemoteAsk                 *ebpf.MapSpec `ebpf:"goakt_actor_remote_ask"`
@@ -190,9 +268,24 @@ type bpfMapSpecs struct {
 	GoaktActorRemoteTellGrain           *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_grain"`
 	GoaktActorRemoteTellGrainReceive    *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_grain_receive"`
 	GoaktActorRemoteTellReceive         *ebpf.MapSpec `ebpf:"goakt_actor_remote_tell_receive"`
+	GoaktActorRestart                   *ebpf.MapSpec `ebpf:"goakt_actor_restart"`
+	GoaktActorSchedule                  *ebpf.MapSpec `ebpf:"goakt_actor_schedule"`
+	GoaktActorScheduleOnce              *ebpf.MapSpec `ebpf:"goakt_actor_schedule_once"`
+	GoaktActorScheduleWithCron          *ebpf.MapSpec `ebpf:"goakt_actor_schedule_with_cron"`
+	GoaktActorSendAsync                 *ebpf.MapSpec `ebpf:"goakt_actor_send_async"`
+	GoaktActorSendSync                  *ebpf.MapSpec `ebpf:"goakt_actor_send_sync"`
+	GoaktActorShutdown                  *ebpf.MapSpec `ebpf:"goakt_actor_shutdown"`
 	GoaktActorSpawnChild                *ebpf.MapSpec `ebpf:"goakt_actor_spawn_child"`
+	GoaktActorSpawnFromFunc             *ebpf.MapSpec `ebpf:"goakt_actor_spawn_from_func"`
+	GoaktActorSpawnNamedFromFunc        *ebpf.MapSpec `ebpf:"goakt_actor_spawn_named_from_func"`
 	GoaktActorSpawnOn                   *ebpf.MapSpec `ebpf:"goakt_actor_spawn_on"`
+	GoaktActorSpawnRouter               *ebpf.MapSpec `ebpf:"goakt_actor_spawn_router"`
+	GoaktActorSpawnSingleton            *ebpf.MapSpec `ebpf:"goakt_actor_spawn_singleton"`
+	GoaktActorStart                     *ebpf.MapSpec `ebpf:"goakt_actor_start"`
+	GoaktActorStop                      *ebpf.MapSpec `ebpf:"goakt_actor_stop"`
+	GoaktActorSystemMetric              *ebpf.MapSpec `ebpf:"goakt_actor_system_metric"`
 	GoaktActorSystemSpawn               *ebpf.MapSpec `ebpf:"goakt_actor_system_spawn"`
+	GoaktActorTell                      *ebpf.MapSpec `ebpf:"goakt_actor_tell"`
 	GoaktActorUprobeStorageMap          *ebpf.MapSpec `ebpf:"goakt_actor_uprobe_storage_map"`
 	ProbeActiveSamplerMap               *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
 	SamplersConfigMap                   *ebpf.MapSpec `ebpf:"samplers_config_map"`
@@ -234,12 +327,28 @@ type bpfMaps struct {
 	AllocMap                            *ebpf.Map `ebpf:"alloc_map"`
 	Events                              *ebpf.Map `ebpf:"events"`
 	GoContextToSc                       *ebpf.Map `ebpf:"go_context_to_sc"`
+	GoaktActorActorExists               *ebpf.Map `ebpf:"goakt_actor_actor_exists"`
 	GoaktActorActorOf                   *ebpf.Map `ebpf:"goakt_actor_actor_of"`
+	GoaktActorActors                    *ebpf.Map `ebpf:"goakt_actor_actors"`
+	GoaktActorAsk                       *ebpf.Map `ebpf:"goakt_actor_ask"`
+	GoaktActorBatchAsk                  *ebpf.Map `ebpf:"goakt_actor_batch_ask"`
+	GoaktActorBatchTell                 *ebpf.Map `ebpf:"goakt_actor_batch_tell"`
+	GoaktActorDiscoverActor             *ebpf.Map `ebpf:"goakt_actor_discover_actor"`
 	GoaktActorDoReceive                 *ebpf.Map `ebpf:"goakt_actor_do_receive"`
 	GoaktActorGoidToSpanContext         *ebpf.Map `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.Map `ebpf:"goakt_actor_grain_process"`
+	GoaktActorKill                      *ebpf.Map `ebpf:"goakt_actor_kill"`
+	GoaktActorPidMetric                 *ebpf.Map `ebpf:"goakt_actor_pid_metric"`
+	GoaktActorPidRemoteLookup           *ebpf.Map `ebpf:"goakt_actor_pid_remote_lookup"`
+	GoaktActorPidRemoteReSpawn          *ebpf.Map `ebpf:"goakt_actor_pid_remote_re_spawn"`
+	GoaktActorPidRemoteStop             *ebpf.Map `ebpf:"goakt_actor_pid_remote_stop"`
+	GoaktActorPidStop                   *ebpf.Map `ebpf:"goakt_actor_pid_stop"`
+	GoaktActorPipeTo                    *ebpf.Map `ebpf:"goakt_actor_pipe_to"`
+	GoaktActorPipeToName                *ebpf.Map `ebpf:"goakt_actor_pipe_to_name"`
 	GoaktActorProcess                   *ebpf.Map `ebpf:"goakt_actor_process"`
+	GoaktActorReSpawn                   *ebpf.Map `ebpf:"goakt_actor_re_spawn"`
+	GoaktActorReinstateNamed            *ebpf.Map `ebpf:"goakt_actor_reinstate_named"`
 	GoaktActorRelocation                *ebpf.Map `ebpf:"goakt_actor_relocation"`
 	GoaktActorRemoteActivateGrain       *ebpf.Map `ebpf:"goakt_actor_remote_activate_grain"`
 	GoaktActorRemoteAsk                 *ebpf.Map `ebpf:"goakt_actor_remote_ask"`
@@ -265,9 +374,24 @@ type bpfMaps struct {
 	GoaktActorRemoteTellGrain           *ebpf.Map `ebpf:"goakt_actor_remote_tell_grain"`
 	GoaktActorRemoteTellGrainReceive    *ebpf.Map `ebpf:"goakt_actor_remote_tell_grain_receive"`
 	GoaktActorRemoteTellReceive         *ebpf.Map `ebpf:"goakt_actor_remote_tell_receive"`
+	GoaktActorRestart                   *ebpf.Map `ebpf:"goakt_actor_restart"`
+	GoaktActorSchedule                  *ebpf.Map `ebpf:"goakt_actor_schedule"`
+	GoaktActorScheduleOnce              *ebpf.Map `ebpf:"goakt_actor_schedule_once"`
+	GoaktActorScheduleWithCron          *ebpf.Map `ebpf:"goakt_actor_schedule_with_cron"`
+	GoaktActorSendAsync                 *ebpf.Map `ebpf:"goakt_actor_send_async"`
+	GoaktActorSendSync                  *ebpf.Map `ebpf:"goakt_actor_send_sync"`
+	GoaktActorShutdown                  *ebpf.Map `ebpf:"goakt_actor_shutdown"`
 	GoaktActorSpawnChild                *ebpf.Map `ebpf:"goakt_actor_spawn_child"`
+	GoaktActorSpawnFromFunc             *ebpf.Map `ebpf:"goakt_actor_spawn_from_func"`
+	GoaktActorSpawnNamedFromFunc        *ebpf.Map `ebpf:"goakt_actor_spawn_named_from_func"`
 	GoaktActorSpawnOn                   *ebpf.Map `ebpf:"goakt_actor_spawn_on"`
+	GoaktActorSpawnRouter               *ebpf.Map `ebpf:"goakt_actor_spawn_router"`
+	GoaktActorSpawnSingleton            *ebpf.Map `ebpf:"goakt_actor_spawn_singleton"`
+	GoaktActorStart                     *ebpf.Map `ebpf:"goakt_actor_start"`
+	GoaktActorStop                      *ebpf.Map `ebpf:"goakt_actor_stop"`
+	GoaktActorSystemMetric              *ebpf.Map `ebpf:"goakt_actor_system_metric"`
 	GoaktActorSystemSpawn               *ebpf.Map `ebpf:"goakt_actor_system_spawn"`
+	GoaktActorTell                      *ebpf.Map `ebpf:"goakt_actor_tell"`
 	GoaktActorUprobeStorageMap          *ebpf.Map `ebpf:"goakt_actor_uprobe_storage_map"`
 	ProbeActiveSamplerMap               *ebpf.Map `ebpf:"probe_active_sampler_map"`
 	SamplersConfigMap                   *ebpf.Map `ebpf:"samplers_config_map"`
@@ -280,12 +404,28 @@ func (m *bpfMaps) Close() error {
 		m.AllocMap,
 		m.Events,
 		m.GoContextToSc,
+		m.GoaktActorActorExists,
 		m.GoaktActorActorOf,
+		m.GoaktActorActors,
+		m.GoaktActorAsk,
+		m.GoaktActorBatchAsk,
+		m.GoaktActorBatchTell,
+		m.GoaktActorDiscoverActor,
 		m.GoaktActorDoReceive,
 		m.GoaktActorGoidToSpanContext,
 		m.GoaktActorGrainDoReceive,
 		m.GoaktActorGrainProcess,
+		m.GoaktActorKill,
+		m.GoaktActorPidMetric,
+		m.GoaktActorPidRemoteLookup,
+		m.GoaktActorPidRemoteReSpawn,
+		m.GoaktActorPidRemoteStop,
+		m.GoaktActorPidStop,
+		m.GoaktActorPipeTo,
+		m.GoaktActorPipeToName,
 		m.GoaktActorProcess,
+		m.GoaktActorReSpawn,
+		m.GoaktActorReinstateNamed,
 		m.GoaktActorRelocation,
 		m.GoaktActorRemoteActivateGrain,
 		m.GoaktActorRemoteAsk,
@@ -311,9 +451,24 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorRemoteTellGrain,
 		m.GoaktActorRemoteTellGrainReceive,
 		m.GoaktActorRemoteTellReceive,
+		m.GoaktActorRestart,
+		m.GoaktActorSchedule,
+		m.GoaktActorScheduleOnce,
+		m.GoaktActorScheduleWithCron,
+		m.GoaktActorSendAsync,
+		m.GoaktActorSendSync,
+		m.GoaktActorShutdown,
 		m.GoaktActorSpawnChild,
+		m.GoaktActorSpawnFromFunc,
+		m.GoaktActorSpawnNamedFromFunc,
 		m.GoaktActorSpawnOn,
+		m.GoaktActorSpawnRouter,
+		m.GoaktActorSpawnSingleton,
+		m.GoaktActorStart,
+		m.GoaktActorStop,
+		m.GoaktActorSystemMetric,
 		m.GoaktActorSystemSpawn,
+		m.GoaktActorTell,
 		m.GoaktActorUprobeStorageMap,
 		m.ProbeActiveSamplerMap,
 		m.SamplersConfigMap,
@@ -337,16 +492,74 @@ type bpfVariables struct {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
+	UprobeActorExists                             *ebpf.Program `ebpf:"uprobe_ActorExists"`
+	UprobeActorExistsReturns                      *ebpf.Program `ebpf:"uprobe_ActorExists_Returns"`
 	UprobeActorOf                                 *ebpf.Program `ebpf:"uprobe_ActorOf"`
 	UprobeActorOfReturns                          *ebpf.Program `ebpf:"uprobe_ActorOf_Returns"`
+	UprobeActors                                  *ebpf.Program `ebpf:"uprobe_Actors"`
+	UprobeActorsReturns                           *ebpf.Program `ebpf:"uprobe_Actors_Returns"`
+	UprobeAsk                                     *ebpf.Program `ebpf:"uprobe_Ask"`
+	UprobeAskReturns                              *ebpf.Program `ebpf:"uprobe_Ask_Returns"`
+	UprobeBatchAsk                                *ebpf.Program `ebpf:"uprobe_BatchAsk"`
+	UprobeBatchAskReturns                         *ebpf.Program `ebpf:"uprobe_BatchAsk_Returns"`
+	UprobeBatchTell                               *ebpf.Program `ebpf:"uprobe_BatchTell"`
+	UprobeBatchTellReturns                        *ebpf.Program `ebpf:"uprobe_BatchTell_Returns"`
+	UprobeDiscoverActor                           *ebpf.Program `ebpf:"uprobe_DiscoverActor"`
+	UprobeDiscoverActorReturns                    *ebpf.Program `ebpf:"uprobe_DiscoverActor_Returns"`
+	UprobeKill                                    *ebpf.Program `ebpf:"uprobe_Kill"`
+	UprobeKillReturns                             *ebpf.Program `ebpf:"uprobe_Kill_Returns"`
+	UprobePipeTo                                  *ebpf.Program `ebpf:"uprobe_PipeTo"`
+	UprobePipeToName                              *ebpf.Program `ebpf:"uprobe_PipeToName"`
+	UprobePipeToNameReturns                       *ebpf.Program `ebpf:"uprobe_PipeToName_Returns"`
+	UprobePipeToReturns                           *ebpf.Program `ebpf:"uprobe_PipeTo_Returns"`
+	UprobeReSpawn                                 *ebpf.Program `ebpf:"uprobe_ReSpawn"`
+	UprobeReSpawnReturns                          *ebpf.Program `ebpf:"uprobe_ReSpawn_Returns"`
+	UprobeReinstateNamed                          *ebpf.Program `ebpf:"uprobe_ReinstateNamed"`
+	UprobeReinstateNamedReturns                   *ebpf.Program `ebpf:"uprobe_ReinstateNamed_Returns"`
 	UprobeRelocate                                *ebpf.Program `ebpf:"uprobe_Relocate"`
 	UprobeRelocateReturns                         *ebpf.Program `ebpf:"uprobe_Relocate_Returns"`
+	UprobeRemoteLookup                            *ebpf.Program `ebpf:"uprobe_RemoteLookup"`
+	UprobeRemoteLookupReturns                     *ebpf.Program `ebpf:"uprobe_RemoteLookup_Returns"`
+	UprobeRemoteReSpawn                           *ebpf.Program `ebpf:"uprobe_RemoteReSpawn"`
+	UprobeRemoteReSpawnReturns                    *ebpf.Program `ebpf:"uprobe_RemoteReSpawn_Returns"`
+	UprobeRemoteStop                              *ebpf.Program `ebpf:"uprobe_RemoteStop"`
+	UprobeRemoteStopReturns                       *ebpf.Program `ebpf:"uprobe_RemoteStop_Returns"`
+	UprobeRestart                                 *ebpf.Program `ebpf:"uprobe_Restart"`
+	UprobeRestartReturns                          *ebpf.Program `ebpf:"uprobe_Restart_Returns"`
+	UprobeSchedule                                *ebpf.Program `ebpf:"uprobe_Schedule"`
+	UprobeScheduleOnce                            *ebpf.Program `ebpf:"uprobe_ScheduleOnce"`
+	UprobeScheduleOnceReturns                     *ebpf.Program `ebpf:"uprobe_ScheduleOnce_Returns"`
+	UprobeScheduleWithCron                        *ebpf.Program `ebpf:"uprobe_ScheduleWithCron"`
+	UprobeScheduleWithCronReturns                 *ebpf.Program `ebpf:"uprobe_ScheduleWithCron_Returns"`
+	UprobeScheduleReturns                         *ebpf.Program `ebpf:"uprobe_Schedule_Returns"`
+	UprobeSendAsync                               *ebpf.Program `ebpf:"uprobe_SendAsync"`
+	UprobeSendAsyncReturns                        *ebpf.Program `ebpf:"uprobe_SendAsync_Returns"`
+	UprobeSendSync                                *ebpf.Program `ebpf:"uprobe_SendSync"`
+	UprobeSendSyncReturns                         *ebpf.Program `ebpf:"uprobe_SendSync_Returns"`
+	UprobeShutdown                                *ebpf.Program `ebpf:"uprobe_Shutdown"`
+	UprobeShutdownReturns                         *ebpf.Program `ebpf:"uprobe_Shutdown_Returns"`
 	UprobeSpawn                                   *ebpf.Program `ebpf:"uprobe_Spawn"`
 	UprobeSpawnChild                              *ebpf.Program `ebpf:"uprobe_SpawnChild"`
 	UprobeSpawnChildReturns                       *ebpf.Program `ebpf:"uprobe_SpawnChild_Returns"`
+	UprobeSpawnFromFunc                           *ebpf.Program `ebpf:"uprobe_SpawnFromFunc"`
+	UprobeSpawnFromFuncReturns                    *ebpf.Program `ebpf:"uprobe_SpawnFromFunc_Returns"`
+	UprobeSpawnNamedFromFunc                      *ebpf.Program `ebpf:"uprobe_SpawnNamedFromFunc"`
+	UprobeSpawnNamedFromFuncReturns               *ebpf.Program `ebpf:"uprobe_SpawnNamedFromFunc_Returns"`
 	UprobeSpawnOn                                 *ebpf.Program `ebpf:"uprobe_SpawnOn"`
 	UprobeSpawnOnReturns                          *ebpf.Program `ebpf:"uprobe_SpawnOn_Returns"`
+	UprobeSpawnRouter                             *ebpf.Program `ebpf:"uprobe_SpawnRouter"`
+	UprobeSpawnRouterReturns                      *ebpf.Program `ebpf:"uprobe_SpawnRouter_Returns"`
+	UprobeSpawnSingleton                          *ebpf.Program `ebpf:"uprobe_SpawnSingleton"`
+	UprobeSpawnSingletonReturns                   *ebpf.Program `ebpf:"uprobe_SpawnSingleton_Returns"`
 	UprobeSpawnReturns                            *ebpf.Program `ebpf:"uprobe_Spawn_Returns"`
+	UprobeStart                                   *ebpf.Program `ebpf:"uprobe_Start"`
+	UprobeStartReturns                            *ebpf.Program `ebpf:"uprobe_Start_Returns"`
+	UprobeTell                                    *ebpf.Program `ebpf:"uprobe_Tell"`
+	UprobeTellReturns                             *ebpf.Program `ebpf:"uprobe_Tell_Returns"`
+	UprobeActorSystemMetric                       *ebpf.Program `ebpf:"uprobe_actorSystem_Metric"`
+	UprobeActorSystemMetricReturns                *ebpf.Program `ebpf:"uprobe_actorSystem_Metric_Returns"`
+	UprobeActorSystemStop                         *ebpf.Program `ebpf:"uprobe_actorSystem_Stop"`
+	UprobeActorSystemStopReturns                  *ebpf.Program `ebpf:"uprobe_actorSystem_Stop_Returns"`
 	UprobeDoReceive                               *ebpf.Program `ebpf:"uprobe_doReceive"`
 	UprobeDoReceiveReturns                        *ebpf.Program `ebpf:"uprobe_doReceive_Returns"`
 	UprobeGrainPID_process                        *ebpf.Program `ebpf:"uprobe_grainPID_process"`
@@ -358,6 +571,10 @@ type bpfPrograms struct {
 	UprobeHandleRemoteAskReturns                  *ebpf.Program `ebpf:"uprobe_handleRemoteAsk_Returns"`
 	UprobeHandleRemoteTell                        *ebpf.Program `ebpf:"uprobe_handleRemoteTell"`
 	UprobeHandleRemoteTellReturns                 *ebpf.Program `ebpf:"uprobe_handleRemoteTell_Returns"`
+	UprobePidMetric                               *ebpf.Program `ebpf:"uprobe_pid_Metric"`
+	UprobePidMetricReturns                        *ebpf.Program `ebpf:"uprobe_pid_Metric_Returns"`
+	UprobePidStop                                 *ebpf.Program `ebpf:"uprobe_pid_Stop"`
+	UprobePidStopReturns                          *ebpf.Program `ebpf:"uprobe_pid_Stop_Returns"`
 	UprobeProcess                                 *ebpf.Program `ebpf:"uprobe_process"`
 	UprobeProcessReturns                          *ebpf.Program `ebpf:"uprobe_process_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler"`
@@ -408,16 +625,74 @@ type bpfPrograms struct {
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.UprobeActorExists,
+		p.UprobeActorExistsReturns,
 		p.UprobeActorOf,
 		p.UprobeActorOfReturns,
+		p.UprobeActors,
+		p.UprobeActorsReturns,
+		p.UprobeAsk,
+		p.UprobeAskReturns,
+		p.UprobeBatchAsk,
+		p.UprobeBatchAskReturns,
+		p.UprobeBatchTell,
+		p.UprobeBatchTellReturns,
+		p.UprobeDiscoverActor,
+		p.UprobeDiscoverActorReturns,
+		p.UprobeKill,
+		p.UprobeKillReturns,
+		p.UprobePipeTo,
+		p.UprobePipeToName,
+		p.UprobePipeToNameReturns,
+		p.UprobePipeToReturns,
+		p.UprobeReSpawn,
+		p.UprobeReSpawnReturns,
+		p.UprobeReinstateNamed,
+		p.UprobeReinstateNamedReturns,
 		p.UprobeRelocate,
 		p.UprobeRelocateReturns,
+		p.UprobeRemoteLookup,
+		p.UprobeRemoteLookupReturns,
+		p.UprobeRemoteReSpawn,
+		p.UprobeRemoteReSpawnReturns,
+		p.UprobeRemoteStop,
+		p.UprobeRemoteStopReturns,
+		p.UprobeRestart,
+		p.UprobeRestartReturns,
+		p.UprobeSchedule,
+		p.UprobeScheduleOnce,
+		p.UprobeScheduleOnceReturns,
+		p.UprobeScheduleWithCron,
+		p.UprobeScheduleWithCronReturns,
+		p.UprobeScheduleReturns,
+		p.UprobeSendAsync,
+		p.UprobeSendAsyncReturns,
+		p.UprobeSendSync,
+		p.UprobeSendSyncReturns,
+		p.UprobeShutdown,
+		p.UprobeShutdownReturns,
 		p.UprobeSpawn,
 		p.UprobeSpawnChild,
 		p.UprobeSpawnChildReturns,
+		p.UprobeSpawnFromFunc,
+		p.UprobeSpawnFromFuncReturns,
+		p.UprobeSpawnNamedFromFunc,
+		p.UprobeSpawnNamedFromFuncReturns,
 		p.UprobeSpawnOn,
 		p.UprobeSpawnOnReturns,
+		p.UprobeSpawnRouter,
+		p.UprobeSpawnRouterReturns,
+		p.UprobeSpawnSingleton,
+		p.UprobeSpawnSingletonReturns,
 		p.UprobeSpawnReturns,
+		p.UprobeStart,
+		p.UprobeStartReturns,
+		p.UprobeTell,
+		p.UprobeTellReturns,
+		p.UprobeActorSystemMetric,
+		p.UprobeActorSystemMetricReturns,
+		p.UprobeActorSystemStop,
+		p.UprobeActorSystemStopReturns,
 		p.UprobeDoReceive,
 		p.UprobeDoReceiveReturns,
 		p.UprobeGrainPID_process,
@@ -429,6 +704,10 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeHandleRemoteAskReturns,
 		p.UprobeHandleRemoteTell,
 		p.UprobeHandleRemoteTellReturns,
+		p.UprobePidMetric,
+		p.UprobePidMetricReturns,
+		p.UprobePidStop,
+		p.UprobePidStopReturns,
 		p.UprobeProcess,
 		p.UprobeProcessReturns,
 		p.UprobeRemoteActivateGrainHandler,
