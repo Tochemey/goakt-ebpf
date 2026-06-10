@@ -79,6 +79,7 @@ func (id ID) ExeLink() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	if filepath.IsAbs(p) {
 		return p, nil
 	}
