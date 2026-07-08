@@ -4,10 +4,10 @@ go 1.26.0
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
-	github.com/cilium/ebpf v0.21.0
+	github.com/cilium/ebpf v0.22.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
-	go.opentelemetry.io/collector/pdata v1.60.0
+	go.opentelemetry.io/collector/pdata v1.61.0
 	go.opentelemetry.io/contrib/detectors/autodetect v0.16.0
 	go.opentelemetry.io/contrib/exporters/autoexport v0.69.0
 	go.opentelemetry.io/otel v1.44.0
@@ -15,8 +15,8 @@ require (
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
-	golang.org/x/arch v0.28.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/arch v0.29.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -76,7 +76,7 @@ require (
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/collector/featuregate v1.60.0 // indirect
+	go.opentelemetry.io/collector/featuregate v1.61.0 // indirect
 	go.opentelemetry.io/contrib/bridges/prometheus v0.69.0 // indirect
 	go.opentelemetry.io/contrib/detectors/aws/ec2/v2 v2.5.1 // indirect
 	go.opentelemetry.io/contrib/detectors/aws/ecs v1.44.0 // indirect
