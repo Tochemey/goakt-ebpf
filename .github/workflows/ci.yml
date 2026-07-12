@@ -73,7 +73,7 @@ jobs:
           go test -v -race -count=1 -coverprofile=coverage.out -coverpkg="$COVER_PKGS" ./...
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Tochemey/goakt-ebpf
