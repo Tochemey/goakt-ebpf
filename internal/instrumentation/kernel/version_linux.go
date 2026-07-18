@@ -24,24 +24,39 @@ func version() *semver.Version {
 		return nil
 	}
 
+	// Expect a release of the form "major.minor..." (e.g. "5.15.0-generic").
+	// Anything else returns nil rather than a mis-parsed version: callers
+	// treat nil conservatively, while a bogus 0.0.0 would silently pass
+	// version gates such as SupportsContextPropagation.
 	var (
 		values [2]uint64
 		value  uint64
 		vi     int
+		digits int
 	)
 	for _, c := range uname.Release {
 		if '0' <= c && c <= '9' {
 			value = (value * 10) + uint64(c-'0') // nolint:gosec  // c >= '0'
-		} else {
-			// Note that we're assuming N.N.N here.
-			// If we see anything else, we are likely to mis-parse it.
-			values[vi] = value //nolint:gosec  // bound checked below
-			vi++
-			if vi >= len(values) {
-				break
-			}
-			value = 0
+			digits++
+			continue
 		}
+		if digits == 0 {
+			// Empty numeric component.
+			return nil
+		}
+		values[vi] = value
+		vi++
+		if vi >= len(values) {
+			break
+		}
+		if c != '.' {
+			// Major and minor must be dot-separated.
+			return nil
+		}
+		value, digits = 0, 0
+	}
+	if vi < len(values) {
+		return nil
 	}
 	return semver.New(values[0], values[1], 0, "", "")
 }

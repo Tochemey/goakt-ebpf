@@ -116,9 +116,14 @@ func (h *TraceHandler) HandleTrace(
 			startOpts,
 			trace.WithAttributes(spanKVs...),
 			trace.WithSpanKind(spanKind(pSpan.Kind())),
-			trace.WithTimestamp(pSpan.StartTimestamp().AsTime()),
 			trace.WithLinks(h.links(pSpan.Links())...),
 		)
+		// An unset timestamp (zero pcommon.Timestamp is 1970-01-01, so
+		// time.IsZero cannot detect it) falls through to the SDK stamping
+		// the current time.
+		if ts := pSpan.StartTimestamp(); ts != 0 {
+			startOpts = append(startOpts, trace.WithTimestamp(ts.AsTime()))
+		}
 
 		_, span := tracer.Start(ctx, pSpan.Name(), startOpts...)
 		startOpts = startOpts[:0]
@@ -134,7 +139,9 @@ func (h *TraceHandler) HandleTrace(
 		c, msg := status(pSpan.Status())
 		span.SetStatus(c, msg)
 
-		endOpts = append(endOpts, trace.WithTimestamp(pSpan.EndTimestamp().AsTime()))
+		if ts := pSpan.EndTimestamp(); ts != 0 {
+			endOpts = append(endOpts, trace.WithTimestamp(ts.AsTime()))
+		}
 		span.End(endOpts...)
 		endOpts = endOpts[:0]
 	}
@@ -255,9 +262,10 @@ func spanKind(kind ptrace.SpanKind) trace.SpanKind {
 }
 
 func appendEventOpts(dest []trace.EventOption, e ptrace.SpanEvent) []trace.EventOption {
-	ts := e.Timestamp().AsTime()
-	if !ts.IsZero() {
-		dest = append(dest, trace.WithTimestamp(ts))
+	// Compare against the zero pcommon.Timestamp: its AsTime is 1970-01-01,
+	// which time.IsZero does not detect.
+	if ts := e.Timestamp(); ts != 0 {
+		dest = append(dest, trace.WithTimestamp(ts.AsTime()))
 	}
 
 	kvs := attrs(e.Attributes())

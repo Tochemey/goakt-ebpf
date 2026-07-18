@@ -110,6 +110,12 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 		"ReceiveContext",
 		"ctx",
 	)
+	grainContextContextID := structfield.NewID(
+		"github.com/tochemey/goakt/v4",
+		"github.com/tochemey/goakt/v4/actor",
+		"GrainContext",
+		"ctx",
+	)
 	processFn := makeProcessFn(logger, targetPID)
 	return &probe.SpanProducer[bpfObjects, event]{
 		Base: probe.Base[bpfObjects, event]{
@@ -119,6 +125,10 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 				probe.StructFieldConst{
 					Key: "receive_context_ctx_offset",
 					ID:  receiveContextContextID,
+				},
+				probe.StructFieldConst{
+					Key: "grain_context_ctx_offset",
+					ID:  grainContextContextID,
 				},
 			},
 			Uprobes: []*probe.Uprobe{
@@ -141,11 +151,15 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).process",
 					EntryProbe:  "uprobe_process",
 					ReturnProbe: "uprobe_process_Returns",
+					// Unexported, so it may be renamed/inlined between GoAkt
+					// releases; a miss must not abort the whole probe load.
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).process",
 					EntryProbe:  "uprobe_grainPID_process",
 					ReturnProbe: "uprobe_grainPID_process_Returns",
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).handleGrainContext",
@@ -503,15 +517,27 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 // parent doReceive event arrives and resolves the app-level TraceID via
 // userspace extraction, the buffered child is fixed up and emitted together.
 func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanSlice {
-	pending := make(map[pcommon.SpanID]event) // BPF parent SpanID → buffered child
+	// BPF parent SpanID → buffered children. A single doReceive can produce
+	// more than one process child before its own event arrives, so values
+	// are slices rather than a single event.
+	pending := make(map[pcommon.SpanID][]event)
 	const maxPending = 256
 
 	return func(e *event) ptrace.SpanSlice {
 		if isProcessWithBPFParent(e) {
-			if len(pending) >= maxPending {
-				clear(pending)
+			key := pcommon.SpanID(e.ParentSpanContext.SpanID)
+			// Drop one buffered parent rather than wiping the whole buffer
+			// when full (the parent whose doReceive never arrived); any
+			// eviction is enough to bound the buffer.
+			if _, ok := pending[key]; !ok && len(pending) >= maxPending {
+				for k, dropped := range pending {
+					logger.Debug("pending process buffer full, dropping buffered spans",
+						"parent_span_id", k, "dropped", len(dropped))
+					delete(pending, k)
+					break
+				}
 			}
-			pending[pcommon.SpanID(e.ParentSpanContext.SpanID)] = *e
+			pending[key] = append(pending[key], *e)
 			return ptrace.NewSpanSlice()
 		}
 
@@ -519,11 +545,13 @@ func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanS
 
 		if len(pending) > 0 {
 			myID := pcommon.SpanID(e.SpanContext.SpanID)
-			if pe, ok := pending[myID]; ok {
-				child := processEvent(&pe, logger, targetPID)
-				if child.Len() > 0 && spans.Len() > 0 {
-					child.At(0).SetTraceID(spans.At(0).TraceID())
-					child.MoveAndAppendTo(spans)
+			if buffered, ok := pending[myID]; ok {
+				for i := range buffered {
+					child := processEvent(&buffered[i], logger, targetPID)
+					if child.Len() > 0 && spans.Len() > 0 {
+						child.At(0).SetTraceID(spans.At(0).TraceID())
+						child.MoveAndAppendTo(spans)
+					}
 				}
 				delete(pending, myID)
 			}

@@ -87,14 +87,14 @@ var index = &Index{
 				newVerKey(v121): {offset: OffsetKey{Offset: 1, Valid: true}, version: v121},
 				newVerKey(v130): {offset: OffsetKey{Offset: 2, Valid: true}, version: v130},
 			},
-			uo: uniqueOffset{value: 0, valid: false},
+			uo: uniqueOffset{value: 0, valid: false, conflict: true},
 		},
 		NewID("std", "net/http", "Response", "Status"): {
 			values: map[verKey]offsetVersion{
 				newVerKey(v110): {offset: OffsetKey{Offset: 0, Valid: false}, version: v110},
 				newVerKey(v120): {offset: OffsetKey{Offset: 0, Valid: true}, version: v120},
 			},
-			uo: uniqueOffset{value: 0, valid: false},
+			uo: uniqueOffset{value: 0, valid: true},
 		},
 		NewID("google.golang.org/grpc", "google.golang.org/grpc", "ClientConn", "target"): {
 			values: map[verKey]offsetVersion{
@@ -103,6 +103,33 @@ var index = &Index{
 			uo: uniqueOffset{value: 0, valid: true},
 		},
 	},
+}
+
+func TestOffsetsUniqueOffsetFallback(t *testing.T) {
+	devVer := semver.New(0, 0, 0, "20260101000000-abcdef123456", "")
+
+	t.Run("invalid first offset does not disable fallback", func(t *testing.T) {
+		var o Offsets
+		// A leading invalid offset must not seed the unique-offset fallback;
+		// the single valid offset that follows should still be usable.
+		o.Put(semver.New(1, 1, 0, "", ""), OffsetKey{Offset: 0, Valid: false})
+		o.Put(semver.New(1, 2, 0, "", ""), OffsetKey{Offset: 7, Valid: true})
+
+		off, ok := o.Get(devVer)
+		assert.True(t, ok, "dev version should fall back to the single valid offset")
+		assert.Equal(t, OffsetKey{Offset: 7, Valid: true}, off)
+	})
+
+	t.Run("conflicting valid offsets disable fallback permanently", func(t *testing.T) {
+		var o Offsets
+		o.Put(semver.New(1, 2, 0, "", ""), OffsetKey{Offset: 7, Valid: true})
+		o.Put(semver.New(1, 3, 0, "", ""), OffsetKey{Offset: 9, Valid: true})
+		// Re-adding a matching offset must not re-enable the fallback.
+		o.Put(semver.New(1, 4, 0, "", ""), OffsetKey{Offset: 7, Valid: true})
+
+		_, ok := o.Get(devVer)
+		assert.False(t, ok, "conflicting offsets must disable the fallback")
+	})
 }
 
 func TestIndexMarshalJSON(t *testing.T) {

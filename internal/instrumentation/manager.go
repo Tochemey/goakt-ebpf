@@ -53,10 +53,16 @@ type Manager struct {
 	proc            *process.Info
 	stop            context.CancelCauseFunc
 	runningProbesWG sync.WaitGroup
-	currentConfig   Config
-	probeMu         sync.Mutex
-	state           managerState
-	stateMu         sync.RWMutex
+	configLoopWG    sync.WaitGroup
+
+	// currentConfig and state are written while holding both stateMu and
+	// probeMu (acquired in that order) so either mutex alone is sufficient
+	// for reading. ConfigLoop must only use probeMu: Stop waits for it while
+	// holding stateMu.
+	currentConfig Config
+	probeMu       sync.Mutex
+	state         managerState
+	stateMu       sync.RWMutex
 }
 
 // NewManager returns a new [Manager].
@@ -218,15 +224,20 @@ func (m *Manager) applyConfig(c Config) error {
 
 		if !currentlyEnabled && newEnabled {
 			m.logger.Info("Enabling probe", "id", id)
-			err = errors.Join(err, p.Load(m.exe, m.proc, c.SamplingConfig))
-			if err == nil {
-				m.runProbe(p)
+			if e := p.Load(m.exe, m.proc, c.SamplingConfig); e != nil {
+				err = errors.Join(err, e)
+				continue
 			}
-			continue
+			m.runProbe(p)
 		}
 	}
 
-	return nil
+	// Record the new config even on partial failure: successfully toggled
+	// probes must not be toggled again on the next update. Failed probes are
+	// reported through the returned error.
+	m.currentConfig = c
+
+	return err
 }
 
 func (m *Manager) runProbe(p probe.Probe) {
@@ -238,23 +249,21 @@ func (m *Manager) runProbe(p probe.Probe) {
 }
 
 func (m *Manager) ConfigLoop(ctx context.Context) {
+	updates := m.cp.Watch()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case c, ok := <-m.cp.Watch():
+		case c, ok := <-updates:
 			if !ok {
 				m.logger.Info(
 					"Configuration provider closed, configuration updates will no longer be received",
 				)
 				return
 			}
-			err := m.applyConfig(c)
-			if err != nil {
+			if err := m.applyConfig(c); err != nil {
 				m.logger.Error("Failed to apply config", "error", err)
-				continue
 			}
-			m.currentConfig = c
 		}
 	}
 }
@@ -273,6 +282,8 @@ func (m *Manager) Load(ctx context.Context) error {
 	}
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
 
 	if m.state == managerStateRunning {
 		return errors.New("manager is already running, load is not allowed")
@@ -292,6 +303,8 @@ func (m *Manager) Load(ctx context.Context) error {
 func (m *Manager) runProbes(ctx context.Context) (context.Context, error) {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
 
 	if m.state != managerStateLoaded {
 		return nil, errors.New("manager is not loaded, call Load before Run")
@@ -316,7 +329,9 @@ func (m *Manager) Run(ctx context.Context) error {
 		return err
 	}
 
-	go m.ConfigLoop(ctx)
+	m.configLoopWG.Go(func() {
+		m.ConfigLoop(ctx)
+	})
 
 	done := make(chan error, 1)
 	go func() {
@@ -349,14 +364,16 @@ func (m *Manager) Stop() error {
 		m.stop(errStop)
 	}
 
+	// Wait for the config loop to exit before tearing probes down so no
+	// config update races with cleanup. ConfigLoop never takes stateMu, so
+	// waiting while holding it is safe.
+	m.configLoopWG.Wait()
+
 	m.probeMu.Lock()
 	defer m.probeMu.Unlock()
 
 	m.logger.Debug("Shutting down all probes")
 	err := m.cleanup()
-
-	// Wait for all probes to stop.
-	m.runningProbesWG.Wait()
 
 	m.state = managerStateStopped
 	return err
@@ -404,7 +421,16 @@ func (m *Manager) loadProbes() error {
 const shutdownTimeout = 30 * time.Second
 
 func (m *Manager) cleanup() error {
-	// Shutdown handler first to flush pending spans to the exporter.
+	// Close probes first: this unblocks their perf readers, letting the Run
+	// goroutines drain remaining events into the handler and exit.
+	var err error
+	for _, i := range m.probes {
+		err = errors.Join(err, i.Close())
+	}
+	m.runningProbesWG.Wait()
+
+	// Only now flush the handler: all producers are done, so every pending
+	// span reaches the exporter.
 	if m.handler != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -413,10 +439,9 @@ func (m *Manager) cleanup() error {
 		}
 	}
 
-	err := m.cp.Shutdown(context.Background())
-	for _, i := range m.probes {
-		err = errors.Join(err, i.Close())
-	}
+	cpCtx, cpCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cpCancel()
+	err = errors.Join(err, m.cp.Shutdown(cpCtx))
 
 	m.logger.Debug("Cleaning bpffs")
 	return errors.Join(err, bpffsCleanup(m.proc))

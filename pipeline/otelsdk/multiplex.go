@@ -11,10 +11,24 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
+	sdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 
 	"github.com/tochemey/goakt-ebpf/pipeline"
 )
+
+// sharedSpanProcessor wraps a span processor whose lifecycle is owned by the
+// Multiplexer. Shutdown only flushes: per-pid handlers all register the same
+// underlying processor in their own TracerProvider, so shutting one handler
+// down must not stop exports for the remaining pids. The Multiplexer's own
+// Shutdown targets the unwrapped processor.
+type sharedSpanProcessor struct {
+	sdk.SpanProcessor
+}
+
+func (p sharedSpanProcessor) Shutdown(ctx context.Context) error {
+	return p.SpanProcessor.ForceFlush(ctx)
+}
 
 // Multiplexer supports sending telemetry from multiple resources through the
 // same processing and exporting pipeline.
@@ -46,6 +60,7 @@ func NewMultiplexer(ctx context.Context, options ...Option) (*Multiplexer, error
 // will also be in a shut down state and will not export any telemetry.
 func (m Multiplexer) Handler(pid int) *pipeline.Handler {
 	c := m.withProcResAttrs(pid)
+	c.spanProcessor = sharedSpanProcessor{c.spanProcessor}
 	return &pipeline.Handler{TraceHandler: newTraceHandler(c)}
 }
 
@@ -74,7 +89,7 @@ func (m Multiplexer) withProcResAttrs(pid int) (c config) {
 	path := "/proc/" + strconv.Itoa(pid) + "/exe"
 	bi, err := buildinfo.ReadFile(path)
 	if err != nil {
-		c.logger.Error("failed to get Go proc build info", "error", err)
+		c.Logger().Error("failed to get Go proc build info", "error", err)
 		return c
 	}
 
@@ -91,7 +106,7 @@ func (m Multiplexer) withProcResAttrs(pid int) (c config) {
 	}
 	switch compiler {
 	case "":
-		c.logger.Debug("failed to identify Go compiler")
+		c.Logger().Debug("failed to identify Go compiler")
 	case "gc":
 		attrs = append(attrs, semconv.ProcessRuntimeName("go"))
 	default:

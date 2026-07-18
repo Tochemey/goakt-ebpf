@@ -211,7 +211,7 @@ func NewSamplingManager(c *ebpf.Collection, conf *Config) (*Manager, error) {
 		ActiveSamplerMap:  probeActiveSampler,
 	}
 
-	if conf == nil {
+	if conf == nil || len(conf.Samplers) == 0 {
 		conf = DefaultConfig()
 	}
 
@@ -226,6 +226,19 @@ func NewSamplingManager(c *ebpf.Collection, conf *Config) (*Manager, error) {
 func (m *Manager) applyConfig(conf *Config) error {
 	if conf == nil {
 		return errors.New("cannot apply nil config")
+	}
+	if len(conf.Samplers) > maxSamplers {
+		return fmt.Errorf(
+			"too many samplers configured: %d, maximum is %d",
+			len(conf.Samplers),
+			maxSamplers,
+		)
+	}
+	if _, ok := conf.Samplers[conf.ActiveSampler]; !ok {
+		return fmt.Errorf(
+			"active sampler %d is not a key of the configured samplers",
+			conf.ActiveSampler,
+		)
 	}
 
 	samplerIDs := make([]SamplerID, 0, len(conf.Samplers))

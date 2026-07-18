@@ -113,7 +113,12 @@ func WithResourceDetector(detector resource.Detector) Option {
 // If OTEL_TRACES_EXPORTER is defined, this option will conflict with
 // [WithEnv]. If both are used, the last one provided will be used.
 func WithTraceExporter(exp sdk.SpanExporter) Option {
-	return fnOpt(func(_ context.Context, c config) (config, error) {
+	return fnOpt(func(ctx context.Context, c config) (config, error) {
+		if c.exporter != nil && c.exporter != exp {
+			// Release the exporter this one replaces (e.g. from an earlier
+			// WithEnv) instead of abandoning it running.
+			_ = c.exporter.Shutdown(ctx)
+		}
 		c.exporter = exp
 		return c, nil
 	})
@@ -157,10 +162,17 @@ var (
 // into any attributes defined by OTEL_RESOURCE_ATTRIBUTES.
 func WithEnv() Option {
 	return fnOpt(func(ctx context.Context, c config) (config, error) {
-		var err error
 		// NewSpanExporter will use an OTLP (HTTP/protobuf) exporter as the
 		// default. This is the OTel recommended default.
-		c.exporter, err = autoexport.NewSpanExporter(ctx)
+		exp, err := autoexport.NewSpanExporter(ctx)
+		if err == nil {
+			if c.exporter != nil && c.exporter != exp {
+				// Release the exporter this one replaces (e.g. from an
+				// earlier WithTraceExporter) instead of abandoning it.
+				_ = c.exporter.Shutdown(ctx)
+			}
+			c.exporter = exp
+		}
 
 		c.resAttrs = append(c.resAttrs, lookupResourceData()...)
 
@@ -262,17 +274,24 @@ func newConfig(ctx context.Context, options []Option) (config, error) {
 		c, e = opt.apply(ctx, c)
 		err = errors.Join(err, e)
 	}
+	if err != nil {
+		// The caller discards this config on error. Return before starting a
+		// batch processor (and the fallback exporter), whose goroutine would
+		// otherwise leak with no owner to shut it down. A caller-owned
+		// exporter is left untouched — shutting it down here would be an
+		// unexpected side effect of a failed constructor.
+		return c, err
+	}
 
 	if c.exporter == nil {
-		var e error
-		c.exporter, e = otlptracehttp.New(ctx)
-		if e != nil {
-			err = errors.Join(err, e)
+		c.exporter, err = otlptracehttp.New(ctx)
+		if err != nil {
+			return c, err
 		}
 	}
 	c.spanProcessor = sdk.NewBatchSpanProcessor(c.exporter)
 
-	return c, err
+	return c, nil
 }
 
 func defaultServiceName() string {
@@ -301,7 +320,13 @@ func (c config) TracerProvider() *sdk.TracerProvider {
 	}
 	// Log spans to stdout when OTEL_TRACES_STDOUT=1 for validating parent-child connections.
 	if os.Getenv("OTEL_TRACES_STDOUT") == "1" {
-		if stdoutExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint()); err == nil {
+		stdoutExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+		if err != nil {
+			c.Logger().Warn(
+				"OTEL_TRACES_STDOUT=1 but the stdout trace exporter could not be created",
+				"error", err,
+			)
+		} else {
 			opts = append(opts, sdk.WithSpanProcessor(sdk.NewBatchSpanProcessor(stdoutExp)))
 		}
 	}

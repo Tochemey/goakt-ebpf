@@ -6,6 +6,7 @@
 package sampling
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,13 @@ func TestFloat64ToNumerator(t *testing.T) {
 		{
 			name:              "invalid input",
 			f:                 1.5,
+			maxDenominator:    100,
+			expectedNumerator: 0,
+			expectedError:     errInvalidFraction,
+		},
+		{
+			name:              "NaN is rejected",
+			f:                 math.NaN(),
 			maxDenominator:    100,
 			expectedNumerator: 0,
 			expectedError:     errInvalidFraction,

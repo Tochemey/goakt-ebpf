@@ -38,15 +38,18 @@ type Offsets struct {
 	// values is a map between version and offset value.
 	values map[verKey]offsetVersion
 
-	// uo is the single offset in the values map.
-	// If there is only one offset, this will be that offset and valid will be true.
-	// Otherwise, valid is false
+	// uo is the single unique valid offset in the values map.
+	// If all valid offsets stored share one value, this will be that offset
+	// and valid will be true. Otherwise, valid is false.
 	uo uniqueOffset
 }
 
 type uniqueOffset struct {
 	value uint64
 	valid bool
+	// conflict records that two different valid offsets have been stored,
+	// permanently disabling the unique-offset fallback.
+	conflict bool
 }
 
 type verKey struct {
@@ -279,10 +282,10 @@ func (o *Offsets) Get(ver *semver.Version) (OffsetKey, bool) {
 	}
 
 	o.mu.RLock()
-	v, ok := o.values[newVerKey(ver)]
-	o.mu.RUnlock()
+	defer o.mu.RUnlock()
 
-	if strings.HasPrefix(ver.String(), "0.0.0") && !ok && o.uo.valid {
+	v, ok := o.values[newVerKey(ver)]
+	if !ok && o.uo.valid && strings.HasPrefix(ver.String(), "0.0.0") {
 		// If we don't have the exact version, but we only have one offset, we
 		// fallback to use that offset. This can happen when a non official version is being used
 		// which contains commit hash in the version string.
@@ -318,16 +321,23 @@ func (o *Offsets) Put(ver *semver.Version, offset OffsetKey) {
 	defer o.mu.Unlock()
 
 	if o.values == nil {
-		o.values = map[verKey]offsetVersion{newVerKey(ver): ov}
-		o.uo.valid = ov.offset.Valid
-		o.uo.value = ov.offset.Offset
-		return
+		o.values = make(map[verKey]offsetVersion)
 	}
-
 	o.values[newVerKey(ver)] = ov
 
-	if o.uo.valid && o.uo.value != ov.offset.Offset {
+	// Track the unique valid offset. Invalid offsets are ignored so a
+	// leading invalid entry cannot permanently disable the fallback.
+	if !ov.offset.Valid {
+		return
+	}
+	switch {
+	case o.uo.conflict:
+	case !o.uo.valid:
+		o.uo.value = ov.offset.Offset
+		o.uo.valid = true
+	case o.uo.value != ov.offset.Offset:
 		o.uo.valid = false
+		o.uo.conflict = true
 	}
 }
 

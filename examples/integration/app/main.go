@@ -75,7 +75,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/echo", otelhttp.NewHandler(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			actor.Tell(r.Context(), echo, "hello")
+			if err := actor.Tell(r.Context(), echo, "hello"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		}), "GET /echo"))
 	mux.Handle("/ask", otelhttp.NewHandler(
@@ -118,12 +121,17 @@ func envInt(key string, defaultVal int) int {
 }
 
 func sendMessages(ctx context.Context, tracer trace.Tracer, echo, pong *actor.PID) {
-	ctx, tellSpan := tracer.Start(ctx, "send-tell")
-	actor.Tell(ctx, echo, "hello")
+	// send-tell and send-ask are independent sibling spans under ctx, not a
+	// chain: each derives its span context from the original ctx so ending
+	// one does not orphan the other.
+	tellCtx, tellSpan := tracer.Start(ctx, "send-tell")
+	if err := actor.Tell(tellCtx, echo, "hello"); err != nil {
+		fmt.Fprintln(os.Stderr, "Tell:", err)
+	}
 	tellSpan.End()
 
-	ctx, askSpan := tracer.Start(ctx, "send-ask")
-	if _, err := actor.Ask(ctx, pong, "ping", 2*time.Second); err != nil {
+	askCtx, askSpan := tracer.Start(ctx, "send-ask")
+	if _, err := actor.Ask(askCtx, pong, "ping", 2*time.Second); err != nil {
 		fmt.Fprintln(os.Stderr, "Ask:", err)
 	}
 	askSpan.End()

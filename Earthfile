@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install bpf2go for eBPF code generation
-RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.21.0
+RUN go install github.com/cilium/ebpf/cmd/bpf2go@v0.22.0
 
 WORKDIR /app
 

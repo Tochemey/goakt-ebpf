@@ -12,4 +12,8 @@
 // Offset of Context field in ReceiveContext struct. Injected from DWARF.
 volatile const u64 receive_context_ctx_offset;
 
+// Offset of ctx field in GrainContext struct. Injected from DWARF. Distinct
+// from ReceiveContext even though the two currently coincide.
+volatile const u64 grain_context_ctx_offset;
+
 #endif

@@ -105,9 +105,11 @@ func TestTraceHandlerHandleTrace(t *testing.T) {
 
 	span.SetKind(ptrace.SpanKindClient)
 
-	startTime := time.Unix(0, 0).UTC()
+	// Non-zero timestamps: an unset (zero) pcommon.Timestamp is not exported
+	// as-is, the SDK stamps the current time instead.
+	startTime := time.Unix(10, 0).UTC()
 	span.SetStartTimestamp(pcommon.NewTimestampFromTime(startTime))
-	endTime := time.Unix(1, 0).UTC()
+	endTime := time.Unix(11, 0).UTC()
 	span.SetEndTimestamp(pcommon.NewTimestampFromTime(endTime))
 
 	pAttrs.CopyTo(span.Attributes())

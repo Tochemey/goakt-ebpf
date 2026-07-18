@@ -91,422 +91,430 @@ struct goakt_actor_span_t {
 
 struct uprobe_data_t {
 	struct goakt_actor_span_t span;
+	/* Saved goid->sc entry that this span shadowed on entry, restored on
+	 * return so an outer span keeps propagating after a nested span ends.
+	 * Not sent to userspace: only span (goakt_actor_span_t) is output. */
+	struct span_context prev_goid_sc;
+	u8 had_prev_goid;
+	/* Nesting depth for same-symbol re-entry on one goroutine: entry bumps
+	 * it, return decrements, and the span is only emitted when it hits 0. */
+	u32 depth;
 };
 
 // Maps for each probe pair (entry stores data, return reads and outputs)
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_do_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_tell SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_ask SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_process SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_grain_process SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_grain_do_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_system_spawn SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_on SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_child SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_spawn SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_spawn_child SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_tell_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_ask_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_relocation SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_tell_grain SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_ask_grain SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_lookup SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_re_spawn SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_stop SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_ask_grain_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_tell_grain_receive SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_activate_grain SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_reinstate SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_passivation_strategy SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_state SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_children SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_parent SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_kind SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_dependencies SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_metric SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_role SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_remote_stash_size SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_actor_of SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_named_from_func SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_from_func SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_router SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_spawn_singleton SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_kill SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_re_spawn SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_actor_exists SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_system_metric SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_actors SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_start SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_stop SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_schedule_once SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_schedule SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_schedule_with_cron SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_tell SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_ask SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_send_async SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_send_sync SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_discover_actor SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pid_stop SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_restart SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pid_metric SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_reinstate_named SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pipe_to SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pipe_to_name SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_batch_tell SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_batch_ask SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pid_remote_lookup SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pid_remote_stop SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_pid_remote_re_spawn SEC(".maps");
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
@@ -522,7 +530,7 @@ struct {
 // Goroutine-scoped span map for same-goroutine propagation.
 // Methods like process() have no context arg; they inherit from doReceive via goid.
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *); /* goroutine ID */
 	__type(value, struct span_context);
 	__uint(max_entries, MAX_CONCURRENT);
@@ -551,6 +559,18 @@ static long get_parent_span_context_goid_first(void *handle, struct span_context
 		return 0;
 	}
 	return -1;
+}
+
+// actor_reentered reports whether a span for this key is already active on the
+// goroutine (same-symbol re-entry). When so, it bumps the nesting depth so the
+// matching return does not emit the span early, and the caller should return.
+static __always_inline bool actor_reentered(void *map, void *key) {
+	struct uprobe_data_t *d = bpf_map_lookup_elem(map, &key);
+	if (d != NULL) {
+		d->depth++;
+		return true;
+	}
+	return false;
 }
 
 // Context extraction params: context_pos 0 = no context (e.g. process()).
@@ -592,7 +612,16 @@ static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 		span->context_ptr = (u64)(long)go_context.data;
 	}
 
-	bpf_map_update_elem(&goakt_actor_goid_to_span_context, &key, &span->sc, 0);
+	/* Save any goid->sc entry we are about to shadow so the outer span's
+	 * propagation is restored when this (nested) span ends. */
+	void *goid_key = (void *)GOROUTINE(ctx);
+	struct span_context *existing =
+		bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &goid_key);
+	if (existing != NULL) {
+		uprobe_data->prev_goid_sc = *existing;
+		uprobe_data->had_prev_goid = 1;
+	}
+	bpf_map_update_elem(&goakt_actor_goid_to_span_context, &goid_key, &span->sc, 0);
 
 	bpf_map_update_elem(map, &key, uprobe_data, 0);
 }
@@ -606,12 +635,29 @@ static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *ke
 		return;
 	}
 
+	if (uprobe_data->depth > 0) {
+		/* Inner return of a same-symbol re-entry: keep the span until the
+		 * outermost return so its end time is not truncated. The map value
+		 * is modified in place. */
+		uprobe_data->depth--;
+		return;
+	}
+
 	struct goakt_actor_span_t *span = &uprobe_data->span;
 	span->end_time = end_time;
 
 	output_span_event(ctx, span, sizeof(*span), &span->sc);
 	stop_tracking_span(&span->sc, &span->psc);
-	bpf_map_delete_elem(&goakt_actor_goid_to_span_context, &key);
+
+	/* Restore the goid->sc entry we shadowed on entry (if any) so an outer
+	 * span keeps propagating; only delete when we were the outermost. */
+	void *goid_key = (void *)GOROUTINE(ctx);
+	if (uprobe_data->had_prev_goid) {
+		bpf_map_update_elem(&goakt_actor_goid_to_span_context, &goid_key,
+				    &uprobe_data->prev_goid_sc, 0);
+	} else {
+		bpf_map_delete_elem(&goakt_actor_goid_to_span_context, &goid_key);
+	}
 
 	bpf_map_delete_elem(map, &key);
 }
@@ -620,7 +666,7 @@ static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *ke
 SEC("uprobe/doReceive")
 int uprobe_doReceive(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_do_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_do_receive, key)) {
 		return 0;
 	}
 
@@ -648,7 +694,7 @@ int uprobe_doReceive_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleRemoteTell")
 int uprobe_handleRemoteTell(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_tell, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_tell, key)) {
 		return 0;
 	}
 
@@ -675,7 +721,7 @@ int uprobe_handleRemoteTell_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleRemoteAsk")
 int uprobe_handleRemoteAsk(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_ask, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_ask, key)) {
 		return 0;
 	}
 
@@ -702,7 +748,7 @@ int uprobe_handleRemoteAsk_Returns(struct pt_regs *ctx) {
 SEC("uprobe/process")
 int uprobe_process(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_process, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_process, key)) {
 		return 0;
 	}
 
@@ -729,7 +775,7 @@ int uprobe_process_Returns(struct pt_regs *ctx) {
 SEC("uprobe/grainPID_process")
 int uprobe_grainPID_process(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_grain_process, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_grain_process, key)) {
 		return 0;
 	}
 
@@ -756,7 +802,7 @@ int uprobe_grainPID_process_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleGrainContext")
 int uprobe_handleGrainContext(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_grain_do_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_grain_do_receive, key)) {
 		return 0;
 	}
 
@@ -769,7 +815,7 @@ int uprobe_handleGrainContext(struct pt_regs *ctx) {
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_DO_RECEIVE,
 			    &goakt_actor_grain_do_receive, 2,
-			    receive_context_ctx_offset, false);
+			    grain_context_ctx_offset, false);
 	return 0;
 }
 
@@ -784,7 +830,7 @@ int uprobe_handleGrainContext_Returns(struct pt_regs *ctx) {
 SEC("uprobe/Spawn")
 int uprobe_Spawn(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_system_spawn, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_system_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -809,7 +855,7 @@ int uprobe_Spawn_Returns(struct pt_regs *ctx) {
 SEC("uprobe/SpawnOn")
 int uprobe_SpawnOn(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_spawn_on, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_spawn_on, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -833,7 +879,7 @@ int uprobe_SpawnOn_Returns(struct pt_regs *ctx) {
 SEC("uprobe/SpawnChild")
 int uprobe_SpawnChild(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_spawn_child, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_spawn_child, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -858,7 +904,7 @@ int uprobe_SpawnChild_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteSpawnHandler")
 int uprobe_remoteSpawnHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_spawn, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -883,7 +929,7 @@ int uprobe_remoteSpawnHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteSpawnChildHandler")
 int uprobe_remoteSpawnChildHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_spawn_child, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_spawn_child, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -908,7 +954,7 @@ int uprobe_remoteSpawnChildHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellHandler")
 int uprobe_remoteTellHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_tell_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_tell_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -933,7 +979,7 @@ int uprobe_remoteTellHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskHandler")
 int uprobe_remoteAskHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_ask_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_ask_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -958,7 +1004,7 @@ int uprobe_remoteAskHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/Relocate")
 int uprobe_Relocate(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_relocation, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_relocation, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -983,7 +1029,7 @@ int uprobe_Relocate_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellGrain")
 int uprobe_remoteTellGrain(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_tell_grain, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_tell_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1007,7 +1053,7 @@ int uprobe_remoteTellGrain_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskGrain")
 int uprobe_remoteAskGrain(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_ask_grain, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_ask_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1031,7 +1077,7 @@ int uprobe_remoteAskGrain_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteLookupHandler")
 int uprobe_remoteLookupHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_lookup, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_lookup, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1055,7 +1101,7 @@ int uprobe_remoteLookupHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteReSpawnHandler")
 int uprobe_remoteReSpawnHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_re_spawn, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_re_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1079,7 +1125,7 @@ int uprobe_remoteReSpawnHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStopHandler")
 int uprobe_remoteStopHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_stop, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_stop, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1103,7 +1149,7 @@ int uprobe_remoteStopHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskGrainHandler")
 int uprobe_remoteAskGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_ask_grain_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_ask_grain_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1127,7 +1173,7 @@ int uprobe_remoteAskGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellGrainHandler")
 int uprobe_remoteTellGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_tell_grain_receive, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_tell_grain_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1151,7 +1197,7 @@ int uprobe_remoteTellGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteActivateGrainHandler")
 int uprobe_remoteActivateGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_activate_grain, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_activate_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1175,7 +1221,7 @@ int uprobe_remoteActivateGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteReinstateHandler")
 int uprobe_remoteReinstateHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_reinstate, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_reinstate, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1199,7 +1245,7 @@ int uprobe_remoteReinstateHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remotePassivationStrategyHandler")
 int uprobe_remotePassivationStrategyHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_passivation_strategy, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_passivation_strategy, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1223,7 +1269,7 @@ int uprobe_remotePassivationStrategyHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStateHandler")
 int uprobe_remoteStateHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_state, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_state, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1247,7 +1293,7 @@ int uprobe_remoteStateHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteChildrenHandler")
 int uprobe_remoteChildrenHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_children, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_children, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1271,7 +1317,7 @@ int uprobe_remoteChildrenHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteParentHandler")
 int uprobe_remoteParentHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_parent, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_parent, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1295,7 +1341,7 @@ int uprobe_remoteParentHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteKindHandler")
 int uprobe_remoteKindHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_kind, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_kind, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1319,7 +1365,7 @@ int uprobe_remoteKindHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteDependenciesHandler")
 int uprobe_remoteDependenciesHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_dependencies, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_dependencies, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1343,7 +1389,7 @@ int uprobe_remoteDependenciesHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteMetricHandler")
 int uprobe_remoteMetricHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_metric, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_metric, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1367,7 +1413,7 @@ int uprobe_remoteMetricHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteRoleHandler")
 int uprobe_remoteRoleHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_role, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_role, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1391,7 +1437,7 @@ int uprobe_remoteRoleHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStashSizeHandler")
 int uprobe_remoteStashSizeHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_remote_stash_size, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_remote_stash_size, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1415,7 +1461,7 @@ int uprobe_remoteStashSizeHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/ActorOf")
 int uprobe_ActorOf(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_actor_of, &key) != NULL) {
+	if (actor_reentered(&goakt_actor_actor_of, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1470,7 +1516,7 @@ PROBE_ENTRY_RETURN(ScheduleWithCron, goakt_actor_schedule_with_cron, EVENT_TYPE_
 SEC("uprobe/actorSystem_Stop")
 int uprobe_actorSystem_Stop(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_stop, &key) != NULL) return 0;
+	if (actor_reentered(&goakt_actor_stop, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1486,7 +1532,7 @@ int uprobe_actorSystem_Stop_Returns(struct pt_regs *ctx) {
 SEC("uprobe/actorSystem_Metric")
 int uprobe_actorSystem_Metric(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_system_metric, &key) != NULL) return 0;
+	if (actor_reentered(&goakt_actor_system_metric, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1541,7 +1587,7 @@ PROBE_PID_ENTRY_RETURN(Shutdown, goakt_actor_shutdown, EVENT_TYPE_SHUTDOWN)
 SEC("uprobe/pid_Stop")
 int uprobe_pid_Stop(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_pid_stop, &key) != NULL) return 0;
+	if (actor_reentered(&goakt_actor_pid_stop, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1557,7 +1603,7 @@ int uprobe_pid_Stop_Returns(struct pt_regs *ctx) {
 SEC("uprobe/pid_Metric")
 int uprobe_pid_Metric(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (bpf_map_lookup_elem(&goakt_actor_pid_metric, &key) != NULL) return 0;
+	if (actor_reentered(&goakt_actor_pid_metric, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;

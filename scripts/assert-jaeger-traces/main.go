@@ -15,6 +15,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 type traceResponse struct {
@@ -244,28 +245,14 @@ func dumpTraces(traces []trace) {
 	for i, t := range traces {
 		fmt.Fprintf(os.Stderr, "\nTrace %d [%s] (%d spans):\n", i+1, t.TraceID, len(t.Spans))
 
+		// Index all spans first so parent lookups work regardless of the
+		// order spans appear in the response.
 		spanByID := make(map[string]span, len(t.Spans))
-		children := make(map[string][]string)
-		roots := make([]string, 0)
-
 		for _, s := range t.Spans {
 			spanByID[s.SpanID] = s
-			parentID := ""
-			for _, ref := range s.References {
-				if ref.RefType == "CHILD_OF" && ref.SpanID != "" {
-					parentID = ref.SpanID
-					break
-				}
-			}
-			if parentID == "" || spanByID[parentID].SpanID == "" {
-				roots = append(roots, s.SpanID)
-			} else {
-				children[parentID] = append(children[parentID], s.SpanID)
-			}
 		}
 
-		// Re-check roots after all spans indexed (parent might appear after child).
-		roots = roots[:0]
+		roots := make([]string, 0)
 		for _, s := range t.Spans {
 			isRoot := true
 			for _, ref := range s.References {
@@ -281,8 +268,7 @@ func dumpTraces(traces []trace) {
 			}
 		}
 
-		// Rebuild children map.
-		children = make(map[string][]string)
+		children := make(map[string][]string)
 		for _, s := range t.Spans {
 			for _, ref := range s.References {
 				if ref.RefType == "CHILD_OF" && ref.SpanID != "" {
@@ -339,27 +325,35 @@ func fetchTraces(baseURL, service string) []trace {
 	return out
 }
 
+// httpClient bounds every Jaeger query so a hung backend fails CI promptly
+// instead of stalling indefinitely.
+var httpClient = &http.Client{Timeout: 15 * time.Second}
+
+// fetchServiceTraces returns the traces for a service. Infrastructure failures
+// (unreachable Jaeger, non-200, undecodable body) are fatal with a clear
+// message so CI does not misdiagnose them as "context propagation broken"; an
+// empty-but-successful response returns an empty slice.
 func fetchServiceTraces(baseURL, service string) []trace {
 	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
 	parsedURL, err := url.ParseRequestURI(rawURL)
 	if err != nil {
-		return nil
+		fatal("invalid Jaeger query URL %q: %v", rawURL, err)
 	}
 	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
 	if err != nil {
-		return nil
+		fatal("build Jaeger request: %v", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil
+		fatal("query Jaeger at %s (is it running?): %v", baseURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		fatal("Jaeger returned HTTP %d for service=%s", resp.StatusCode, service)
 	}
 	var tr traceResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		return nil
+		fatal("decode Jaeger response for service=%s: %v", service, err)
 	}
 	return tr.Data
 }

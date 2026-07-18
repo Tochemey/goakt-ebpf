@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/Masterminds/semver/v3"
@@ -92,6 +93,10 @@ const (
 	// DefaultBufferMapName is the default name of the eBPF map used to pass
 	// events from the eBPF program to userspace.
 	DefaultBufferMapName = "events"
+
+	// readErrorBackoff is how long event processing loops pause after a
+	// perf reader error, preventing a hot spin on persistent failures.
+	readErrorBackoff = 100 * time.Millisecond
 )
 
 // Manifest returns the Probe's instrumentation Manifest.
@@ -139,22 +144,23 @@ func (i *Base[BPFObj, BPFEvent]) Load(
 		return err
 	}
 
+	// On any failure below, release everything acquired so far (collection,
+	// attached uprobes, reader): a partially loaded probe would otherwise
+	// keep uprobes attached to the target with nobody draining events.
 	err = i.loadUprobes(exec, info)
 	if err != nil {
-		return err
+		return errors.Join(err, i.Close())
 	}
 
 	err = i.initReader()
 	if err != nil {
-		return err
+		return errors.Join(err, i.Close())
 	}
 
 	i.samplingManager, err = sampling.NewSamplingManager(i.collection, sampler)
 	if err != nil {
-		return err
+		return errors.Join(err, i.Close())
 	}
-
-	i.closers = append(i.closers, i.reader)
 
 	return nil
 }
@@ -258,11 +264,6 @@ func (i *Base[BPFObj, BPFEvent]) buildEBPFCollection(
 	info *process.Info,
 	spec *ebpf.CollectionSpec,
 ) (*ebpf.Collection, error) {
-	obj := new(BPFObj)
-	if c, ok := (interface{}(obj)).(io.Closer); ok {
-		i.closers = append(i.closers, c)
-	}
-
 	sOpts := &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: bpffs.PathForTargetApplication(info),
@@ -321,15 +322,20 @@ func (i *Base[BPFObj, BPFEvent]) read() (*BPFEvent, error) {
 	return event, nil
 }
 
-// Close stops the Probe.
+// Close stops the Probe. It is safe to call multiple times and resets the
+// Probe's state so it can be loaded again.
 func (i *Base[BPFObj, BPFEvent]) Close() error {
 	if i.collection != nil {
 		i.collection.Close()
+		i.collection = nil
 	}
 	var err error
 	for _, c := range i.closers {
 		err = errors.Join(err, c.Close())
 	}
+	i.closers = nil
+	i.reader = nil
+	i.samplingManager = nil
 	if err == nil {
 		i.Logger.Debug("Closed", "Probe", i.ID)
 	}
@@ -363,6 +369,7 @@ func (i *SpanProducer[BPFObj, BPFEvent]) Run(h *pipeline.Handler) {
 			if errors.Is(err, perf.ErrClosed) {
 				return
 			}
+			time.Sleep(readErrorBackoff)
 			continue
 		}
 		if event == nil {
@@ -393,6 +400,7 @@ func (i *TraceProducer[BPFObj, BPFEvent]) Run(h *pipeline.Handler) {
 			if errors.Is(err, perf.ErrClosed) {
 				return
 			}
+			time.Sleep(readErrorBackoff)
 			continue
 		}
 		if event == nil {
@@ -432,6 +440,14 @@ func (u *Uprobe) load(exec *link.Executable, info *process.Info, c *ebpf.Collect
 
 	var closers []io.Closer
 
+	// closeAll detaches the links attached so far when a later step fails;
+	// otherwise they would stay attached to the target with no owner.
+	closeAll := func() {
+		for _, closer := range closers {
+			_ = closer.Close()
+		}
+	}
+
 	if u.EntryProbe != "" {
 		entryProg, ok := c.Programs[u.EntryProbe]
 		if !ok {
@@ -448,10 +464,12 @@ func (u *Uprobe) load(exec *link.Executable, info *process.Info, c *ebpf.Collect
 	if u.ReturnProbe != "" {
 		retProg, ok := c.Programs[u.ReturnProbe]
 		if !ok {
+			closeAll()
 			return fmt.Errorf("return probe %s not found", u.ReturnProbe)
 		}
 		retOffsets, err := info.GetFunctionReturns(u.Sym)
 		if err != nil {
+			closeAll()
 			return err
 		}
 
@@ -459,6 +477,7 @@ func (u *Uprobe) load(exec *link.Executable, info *process.Info, c *ebpf.Collect
 			opts := &link.UprobeOptions{Address: ret, PID: int(info.ID)}
 			l, err := exec.Uprobe("", retProg, opts)
 			if err != nil {
+				closeAll()
 				return err
 			}
 			closers = append(closers, l)

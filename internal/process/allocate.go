@@ -7,7 +7,6 @@
 package process
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -91,22 +90,25 @@ func remoteAllocate(logger *slog.Logger, id ID, mapSize uint64) (uint64, error) 
 
 	addr, err := program.Mmap(mapSize, math.MaxUint64)
 	if err != nil {
-		return 0, err
-	}
-	if addr == math.MaxUint64 {
-		// On success, mmap() returns a pointer to the mapped area.
-		// On error, the value MAP_FAILED (that is, (void *) -1) is returned
-		return 0, errors.New("mmap MAP_FAILED")
+		return 0, fmt.Errorf("mmap in target: %w", err)
 	}
 
-	err = program.Madvise(addr, mapSize)
-	if err != nil {
-		return 0, err
+	// Unmap the region in the target if a follow-up step fails, so repeated
+	// allocation attempts do not accumulate mappings in the target.
+	unmap := func() {
+		if e := program.Munmap(addr, mapSize); e != nil {
+			logger.Error("Failed to munmap in target", "error", e, "pid", id)
+		}
 	}
 
-	err = program.Mlock(addr, mapSize)
-	if err != nil {
-		return 0, err
+	if err := program.Madvise(addr, mapSize); err != nil {
+		unmap()
+		return 0, fmt.Errorf("madvise in target: %w", err)
+	}
+
+	if err := program.Mlock(addr, mapSize); err != nil {
+		unmap()
+		return 0, fmt.Errorf("mlock in target: %w", err)
 	}
 
 	return addr, nil

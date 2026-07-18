@@ -37,8 +37,9 @@ func Mount(target *process.Info) error {
 		}
 	}
 
-	// create directory with read, write and execute permissions
-	return os.Mkdir(PathForTargetApplication(target), 0o755)
+	// Create directory with read, write and execute permissions. MkdirAll
+	// tolerates a directory left behind by a previous crashed run.
+	return os.MkdirAll(PathForTargetApplication(target), 0o755)
 }
 
 func isBPFFSMounted() bool {

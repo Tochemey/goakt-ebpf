@@ -7,6 +7,7 @@ package process
 
 import (
 	"encoding/binary"
+	stderrors "errors"
 	"syscall"
 
 	"github.com/pkg/errors"
@@ -40,7 +41,8 @@ func setRegs(pid int, regs *syscall.PtraceRegs) error {
 	return nil
 }
 
-// Syscall runs a syscall at main thread of process.
+// Syscall runs a syscall at main thread of process. On failure inside the
+// target (a -errno return) the errno is returned as a [syscall.Errno].
 func (p *tracedProgram) Syscall(number uint64, args ...uint64) (uint64, error) {
 	if len(args) > 7 {
 		return 0, errors.New("too many arguments for a syscall")
@@ -52,9 +54,24 @@ func (p *tracedProgram) Syscall(number uint64, args ...uint64) (uint64, error) {
 		return 0, err
 	}
 
+	ret, err := p.injectSyscall(number, args...)
+
+	// Restore unconditionally: once Protect has run, an error part-way
+	// through injection can leave the target with a clobbered instruction
+	// pointer or a syscall instruction poked over its real code.
+	if restoreErr := p.Restore(); restoreErr != nil {
+		err = stderrors.Join(err, restoreErr)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return syscallReturn(ret)
+}
+
+func (p *tracedProgram) injectSyscall(number uint64, args ...uint64) (uint64, error) {
 	var regs syscall.PtraceRegs
 
-	err = getRegs(p.pid, &regs)
+	err := getRegs(p.pid, &regs)
 	if err != nil {
 		return 0, err
 	}
@@ -92,5 +109,5 @@ func (p *tracedProgram) Syscall(number uint64, args ...uint64) (uint64, error) {
 		return 0, err
 	}
 
-	return regs.Regs[0], p.Restore()
+	return regs.Regs[0], nil
 }

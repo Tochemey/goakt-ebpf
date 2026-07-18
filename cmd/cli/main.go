@@ -38,7 +38,11 @@ func main() {
 	logLevel := flag.String("log-level", "", "Log level: debug, info, warn, error (default: info, or "+envLogLevel+")")
 	flag.Parse()
 
-	logger := newLogger(resolveLogLevel(*logLevel))
+	level := resolveLogLevel(*logLevel)
+	logger, levelValid := newLoggerChecked(level)
+	if !levelValid {
+		logger.Warn("invalid log level, defaulting to info", "requested", level)
+	}
 
 	targetPID, err := resolveTarget(*pid, *exe)
 	if err != nil {
@@ -53,6 +57,18 @@ func main() {
 	}
 }
 
+// newLoggerChecked parses level, returning whether it was valid so the caller
+// can warn on a typo instead of silently falling back to info.
+func newLoggerChecked(level string) (*slog.Logger, bool) {
+	var l slog.Level
+	valid := l.UnmarshalText([]byte(level)) == nil
+	if !valid {
+		l = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: l}
+	return slog.New(slog.NewJSONHandler(os.Stderr, opts)), valid
+}
+
 func resolveLogLevel(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
@@ -61,16 +77,6 @@ func resolveLogLevel(flagVal string) string {
 		return v
 	}
 	return defaultLevel
-}
-
-func newLogger(level string) *slog.Logger {
-	var l slog.Level
-	if err := l.UnmarshalText([]byte(level)); err != nil {
-		l = slog.LevelInfo
-	}
-	opts := &slog.HandlerOptions{Level: l}
-	h := slog.NewJSONHandler(os.Stderr, opts)
-	return slog.New(h)
 }
 
 func resolveTarget(pid int, exe string) (int, error) {
@@ -122,6 +128,10 @@ func run(logger *slog.Logger, pid int) error {
 	defer cancel(nil)
 	go watchTarget(ctx, procID, cancel)
 
+	// Once shutdown has begun, a second signal force-exits rather than being
+	// absorbed while cleanup (up to the manager's shutdown timeout) runs.
+	go forceExitOnSecondSignal(ctx, logger)
+
 	handler, err := otelsdk.NewHandler(ctx, otelsdk.WithLogger(logger), otelsdk.WithEnv())
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
@@ -144,10 +154,32 @@ func run(logger *slog.Logger, pid int) error {
 	}
 
 	err = manager.Run(ctx)
-	if errors.Is(context.Cause(ctx), errTargetExited) {
+
+	// A graceful stop — the target exiting or an operator signal (Ctrl-C /
+	// SIGTERM) — is a clean shutdown, not a failure. Report it as success so
+	// supervisors and CI do not see a non-zero exit code.
+	cause := context.Cause(ctx)
+	switch {
+	case errors.Is(cause, errTargetExited):
 		logger.Info("target process exited, shutting down")
+		return nil
+	case errors.Is(cause, context.Canceled):
+		logger.Info("received shutdown signal, shutting down")
+		return nil
 	}
 	return err
+}
+
+// forceExitOnSecondSignal waits until shutdown has begun (ctx cancelled) and
+// then force-exits on the next signal, so a second Ctrl-C/SIGTERM is not
+// absorbed while cleanup runs. The goroutine is reaped by process exit.
+func forceExitOnSecondSignal(ctx context.Context, logger *slog.Logger) {
+	<-ctx.Done()
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	<-ch
+	logger.Warn("second signal received during shutdown, forcing exit")
+	os.Exit(1)
 }
 
 func watchTarget(ctx context.Context, pid process.ID, cancel context.CancelCauseFunc) {

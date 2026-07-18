@@ -29,6 +29,10 @@ func (p *tracedProgram) Mmap(length uint64, fd uint64) (uint64, error) {
 	return 0, nil
 }
 
+func (p *tracedProgram) Munmap(addr uint64, length uint64) error {
+	return nil
+}
+
 func (p *tracedProgram) Madvise(addr uint64, length uint64) error {
 	return nil
 }

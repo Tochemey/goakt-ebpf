@@ -194,7 +194,9 @@ This links spans that share a context (e.g. `actor.doReceive` as parent of neste
 
 ### Goroutine-Scoped Span Map
 
-A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propagates context within the same goroutine. On span start, the map is updated; on span end, the entry is deleted. `get_parent_span_context_goid_first` tries the context chain first, then falls back to this map.
+A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propagates context within the same goroutine. On span start the map is updated, and the previous entry (if any) is saved in the per-probe storage so it can be restored; on span end the saved outer entry is restored, or the entry is deleted when there was none. This keeps an outer span propagating after a nested span on the same goroutine ends, instead of leaving the goroutine with no registered parent. `get_parent_span_context_goid_first` tries the context chain first, then falls back to this map.
+
+Same-symbol re-entry on one goroutine is tracked with a nesting depth counter in the per-probe map value: the entry probe bumps the depth instead of overwriting, and the return probe only emits the span (with its true end time) once the depth returns to zero. The per-probe and goid maps are `BPF_MAP_TYPE_LRU_HASH`, so an entry orphaned by a return that never fires (e.g. a probed function unwound by a Go panic) is evicted under pressure rather than eventually wedging the probe when it reaches capacity.
 
 This gives `actor.process` a BPF-level parent link to `actor.doReceive` (both run on the same goroutine). However, the BPF-assigned TraceID may differ from the app's TraceID because `doReceive`'s TraceID is overridden later by userspace context extraction. The Go-side event buffering in `makeProcessFn` resolves this: `process` events are buffered until the parent `doReceive` event is processed, then emitted with the corrected TraceID (see [Event Buffering](#event-buffering)).
 
@@ -301,14 +303,14 @@ Result:
           └── actor.process (app TraceID, parent = doReceive)
 ```
 
-The buffer is bounded (`maxPending = 256`) with `clear` on overflow. Events are processed serially in `SpanProducer.Run`, so no locking is needed. If `doReceive` never arrives (e.g. probe failure), buffered process events are silently dropped on overflow.
+The buffer is bounded (`maxPending = 256`). On overflow the oldest buffered parent's entries are evicted (FIFO) and logged, rather than clearing the whole buffer, and each parent can hold more than one buffered child. Events are processed serially in `SpanProducer.Run`, so no locking is needed. If `doReceive` never arrives (e.g. probe failure), the buffered process events for that parent are eventually evicted as newer events fill the buffer.
 
 ### Context Extraction by Method
 
 | Symbol                            | Context source | `passed_as_arg` | `context_pos` | `context_offset`                |
 |-----------------------------------|----------------|-----------------|---------------|---------------------------------|
-| `(*PID).doReceive`                | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.Context` |
-| `(*grainPID).handleGrainContext`  | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.Context` |
+| `(*PID).doReceive`                | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.ctx`     |
+| `(*grainPID).handleGrainContext`  | GrainContext   | false           | 2             | DWARF: `GrainContext.ctx`       |
 | `(*actorSystem).handleRemoteTell` | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).handleRemoteAsk`  | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).Spawn`            | Direct arg     | true            | 2             | 0                               |

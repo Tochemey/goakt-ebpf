@@ -63,6 +63,18 @@ func newTracedProgram(id ID, logger *slog.Logger) (*tracedProgram, error) {
 	tidMap := make(map[int]bool)
 	retryCount := make(map[int]int)
 
+	// Detach every thread we have attached so far. Must be called on every
+	// error return once at least one PtraceAttach has succeeded; otherwise
+	// those threads stay in ptrace-stop and the target hangs.
+	detachAttached := func() {
+		for tid := range tidMap {
+			if e := syscall.PtraceDetach(tid); e != nil &&
+				!strings.Contains(e.Error(), "no such process") {
+				logger.Error("detach failed", "error", e, "tid", tid)
+			}
+		}
+	}
+
 	// iterate over the thread group, until it doesn't change
 	//
 	// we have tried several ways to ensure that we have stopped all the tasks:
@@ -73,6 +85,7 @@ func newTracedProgram(id ID, logger *slog.Logger) (*tracedProgram, error) {
 	for {
 		threads, err := id.Tasks()
 		if err != nil {
+			detachAttached()
 			return nil, errors.WithStack(err)
 		}
 
@@ -83,6 +96,7 @@ func newTracedProgram(id ID, logger *slog.Logger) (*tracedProgram, error) {
 		for _, thread := range threads {
 			tid64, err := strconv.ParseInt(thread.Name(), 10, 32)
 			if err != nil {
+				detachAttached()
 				return nil, errors.WithStack(err)
 			}
 			tid := int(tid64)
@@ -116,6 +130,7 @@ func newTracedProgram(id ID, logger *slog.Logger) (*tracedProgram, error) {
 				}
 
 				if !strings.Contains(err.Error(), "no such process") {
+					detachAttached()
 					return nil, errors.WithStack(err)
 				}
 				continue
@@ -127,6 +142,7 @@ func newTracedProgram(id ID, logger *slog.Logger) (*tracedProgram, error) {
 				if e != nil && !strings.Contains(e.Error(), "no such process") {
 					logger.Error("detach failed", "error", e, "tid", tid)
 				}
+				detachAttached()
 				return nil, errors.WithStack(err)
 			}
 
@@ -203,7 +219,7 @@ func (p *tracedProgram) Restore() error {
 
 // Wait waits until the process stops.
 func (p *tracedProgram) Wait() error {
-	_, err := syscall.Wait4(p.pid, nil, 0, nil)
+	_, err := unix.Wait4(p.pid, nil, unix.WALL, nil)
 	return err
 }
 
@@ -228,6 +244,19 @@ func (p *tracedProgram) SetMemLockInfinity() error {
 	return nil
 }
 
+// maxErrno is the largest errno a raw Linux syscall encodes in its return
+// value (the kernel's MAX_ERRNO).
+const maxErrno = 4095
+
+// syscallReturn converts a raw syscall return value into (value, error)
+// following the Linux convention: values in [-MAX_ERRNO, -1] are -errno.
+func syscallReturn(ret uint64) (uint64, error) {
+	if v := int64(ret); v < 0 && v >= -maxErrno {
+		return 0, syscall.Errno(-v)
+	}
+	return ret, nil
+}
+
 // Mmap runs mmap syscall.
 func (p *tracedProgram) Mmap(length, fd uint64) (uint64, error) {
 	return p.Syscall(
@@ -239,6 +268,12 @@ func (p *tracedProgram) Mmap(length, fd uint64) (uint64, error) {
 		fd,
 		0,
 	)
+}
+
+// Munmap runs munmap syscall.
+func (p *tracedProgram) Munmap(addr, length uint64) error {
+	_, err := p.Syscall(syscall.SYS_MUNMAP, addr, length, 0, 0, 0, 0)
+	return err
 }
 
 // Madvise runs madvise syscall.
@@ -261,7 +296,6 @@ func (p *tracedProgram) Madvise(addr, length uint64) error {
 
 // Mlock runs mlock syscall.
 func (p *tracedProgram) Mlock(addr, length uint64) error {
-	ret, err := p.Syscall(syscall.SYS_MLOCK, addr, length, 0, 0, 0, 0)
-	p.logger.Debug("mlock ret", "ret", ret)
+	_, err := p.Syscall(syscall.SYS_MLOCK, addr, length, 0, 0, 0, 0)
 	return err
 }
