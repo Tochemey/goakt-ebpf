@@ -38,6 +38,7 @@ type bpfUprobeDataT struct {
 		Sc                  bpfSpanContext
 		Psc                 bpfSpanContext
 		ContextPtr          uint64
+		ReceiveCtxPtr       uint64
 	}
 	PrevGoidSc  bpfSpanContext
 	HadPrevGoid uint8
@@ -192,11 +193,13 @@ const (
 	bpfProgUprobeActorSystemStopReturns                  = "uprobe_actorSystem_Stop_Returns"
 	bpfProgUprobeDoReceive                               = "uprobe_doReceive"
 	bpfProgUprobeDoReceiveReturns                        = "uprobe_doReceive_Returns"
-	bpfProgUprobeGrainPID_process                        = "uprobe_grainPID_process"
-	bpfProgUprobeGrainPID_processReturns                 = "uprobe_grainPID_process_Returns"
+	bpfProgUprobeGrainReceive                            = "uprobe_grainReceive"
+	bpfProgUprobeGrainReceiveReturns                     = "uprobe_grainReceive_Returns"
 	bpfProgUprobeHandleGrainContext                      = "uprobe_handleGrainContext"
 	bpfProgUprobeHandleGrainContextReturns               = "uprobe_handleGrainContext_Returns"
+	bpfProgUprobeHandleReceived                          = "uprobe_handleReceived"
 	bpfProgUprobeHandleReceivedError                     = "uprobe_handleReceivedError"
+	bpfProgUprobeHandleReceivedReturns                   = "uprobe_handleReceived_Returns"
 	bpfProgUprobeHandleRemoteAsk                         = "uprobe_handleRemoteAsk"
 	bpfProgUprobeHandleRemoteAskReturns                  = "uprobe_handleRemoteAsk_Returns"
 	bpfProgUprobeHandleRemoteTell                        = "uprobe_handleRemoteTell"
@@ -205,8 +208,6 @@ const (
 	bpfProgUprobePidMetricReturns                        = "uprobe_pid_Metric_Returns"
 	bpfProgUprobePidStop                                 = "uprobe_pid_Stop"
 	bpfProgUprobePidStopReturns                          = "uprobe_pid_Stop_Returns"
-	bpfProgUprobeProcess                                 = "uprobe_process"
-	bpfProgUprobeProcessReturns                          = "uprobe_process_Returns"
 	bpfProgUprobeRemoteActivateGrainHandler              = "uprobe_remoteActivateGrainHandler"
 	bpfProgUprobeRemoteActivateGrainHandlerReturns       = "uprobe_remoteActivateGrainHandler_Returns"
 	bpfProgUprobeRemoteAskGrain                          = "uprobe_remoteAskGrain"
@@ -371,11 +372,13 @@ type bpfProgramSpecs struct {
 	UprobeActorSystemStopReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Stop_Returns"`
 	UprobeDoReceive                               *ebpf.ProgramSpec `ebpf:"uprobe_doReceive"`
 	UprobeDoReceiveReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_doReceive_Returns"`
-	UprobeGrainPID_process                        *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process"`
-	UprobeGrainPID_processReturns                 *ebpf.ProgramSpec `ebpf:"uprobe_grainPID_process_Returns"`
+	UprobeGrainReceive                            *ebpf.ProgramSpec `ebpf:"uprobe_grainReceive"`
+	UprobeGrainReceiveReturns                     *ebpf.ProgramSpec `ebpf:"uprobe_grainReceive_Returns"`
 	UprobeHandleGrainContext                      *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext"`
 	UprobeHandleGrainContextReturns               *ebpf.ProgramSpec `ebpf:"uprobe_handleGrainContext_Returns"`
+	UprobeHandleReceived                          *ebpf.ProgramSpec `ebpf:"uprobe_handleReceived"`
 	UprobeHandleReceivedError                     *ebpf.ProgramSpec `ebpf:"uprobe_handleReceivedError"`
+	UprobeHandleReceivedReturns                   *ebpf.ProgramSpec `ebpf:"uprobe_handleReceived_Returns"`
 	UprobeHandleRemoteAsk                         *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk"`
 	UprobeHandleRemoteAskReturns                  *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteAsk_Returns"`
 	UprobeHandleRemoteTell                        *ebpf.ProgramSpec `ebpf:"uprobe_handleRemoteTell"`
@@ -384,8 +387,6 @@ type bpfProgramSpecs struct {
 	UprobePidMetricReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_pid_Metric_Returns"`
 	UprobePidStop                                 *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop"`
 	UprobePidStopReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop_Returns"`
-	UprobeProcess                                 *ebpf.ProgramSpec `ebpf:"uprobe_process"`
-	UprobeProcessReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_process_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler"`
 	UprobeRemoteActivateGrainHandlerReturns       *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
 	UprobeRemoteAskGrain                          *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrain"`
@@ -782,11 +783,13 @@ type bpfPrograms struct {
 	UprobeActorSystemStopReturns                  *ebpf.Program `ebpf:"uprobe_actorSystem_Stop_Returns"`
 	UprobeDoReceive                               *ebpf.Program `ebpf:"uprobe_doReceive"`
 	UprobeDoReceiveReturns                        *ebpf.Program `ebpf:"uprobe_doReceive_Returns"`
-	UprobeGrainPID_process                        *ebpf.Program `ebpf:"uprobe_grainPID_process"`
-	UprobeGrainPID_processReturns                 *ebpf.Program `ebpf:"uprobe_grainPID_process_Returns"`
+	UprobeGrainReceive                            *ebpf.Program `ebpf:"uprobe_grainReceive"`
+	UprobeGrainReceiveReturns                     *ebpf.Program `ebpf:"uprobe_grainReceive_Returns"`
 	UprobeHandleGrainContext                      *ebpf.Program `ebpf:"uprobe_handleGrainContext"`
 	UprobeHandleGrainContextReturns               *ebpf.Program `ebpf:"uprobe_handleGrainContext_Returns"`
+	UprobeHandleReceived                          *ebpf.Program `ebpf:"uprobe_handleReceived"`
 	UprobeHandleReceivedError                     *ebpf.Program `ebpf:"uprobe_handleReceivedError"`
+	UprobeHandleReceivedReturns                   *ebpf.Program `ebpf:"uprobe_handleReceived_Returns"`
 	UprobeHandleRemoteAsk                         *ebpf.Program `ebpf:"uprobe_handleRemoteAsk"`
 	UprobeHandleRemoteAskReturns                  *ebpf.Program `ebpf:"uprobe_handleRemoteAsk_Returns"`
 	UprobeHandleRemoteTell                        *ebpf.Program `ebpf:"uprobe_handleRemoteTell"`
@@ -795,8 +798,6 @@ type bpfPrograms struct {
 	UprobePidMetricReturns                        *ebpf.Program `ebpf:"uprobe_pid_Metric_Returns"`
 	UprobePidStop                                 *ebpf.Program `ebpf:"uprobe_pid_Stop"`
 	UprobePidStopReturns                          *ebpf.Program `ebpf:"uprobe_pid_Stop_Returns"`
-	UprobeProcess                                 *ebpf.Program `ebpf:"uprobe_process"`
-	UprobeProcessReturns                          *ebpf.Program `ebpf:"uprobe_process_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler"`
 	UprobeRemoteActivateGrainHandlerReturns       *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
 	UprobeRemoteAskGrain                          *ebpf.Program `ebpf:"uprobe_remoteAskGrain"`
@@ -915,11 +916,13 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeActorSystemStopReturns,
 		p.UprobeDoReceive,
 		p.UprobeDoReceiveReturns,
-		p.UprobeGrainPID_process,
-		p.UprobeGrainPID_processReturns,
+		p.UprobeGrainReceive,
+		p.UprobeGrainReceiveReturns,
 		p.UprobeHandleGrainContext,
 		p.UprobeHandleGrainContextReturns,
+		p.UprobeHandleReceived,
 		p.UprobeHandleReceivedError,
+		p.UprobeHandleReceivedReturns,
 		p.UprobeHandleRemoteAsk,
 		p.UprobeHandleRemoteAskReturns,
 		p.UprobeHandleRemoteTell,
@@ -928,8 +931,6 @@ func (p *bpfPrograms) Close() error {
 		p.UprobePidMetricReturns,
 		p.UprobePidStop,
 		p.UprobePidStopReturns,
-		p.UprobeProcess,
-		p.UprobeProcessReturns,
 		p.UprobeRemoteActivateGrainHandler,
 		p.UprobeRemoteActivateGrainHandlerReturns,
 		p.UprobeRemoteAskGrain,

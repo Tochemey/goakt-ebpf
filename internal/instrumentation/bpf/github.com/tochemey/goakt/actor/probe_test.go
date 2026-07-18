@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/otel/trace"
 
 	instcontext "github.com/tochemey/goakt-ebpf/internal/instrumentation/context"
@@ -106,35 +107,16 @@ func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
 		return &sc
 	}
 
-	processFn := makeProcessFn(slog.Default(), 42)
-
 	bpfTraceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
 	doReceiveBPFSpanID := trace.SpanID{0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55}
 	processBPFSpanID := trace.SpanID{0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66}
+	const receiveCtxPtr = 0xCAFEF00D
 
-	t.Run("buffers process event and resolves on doReceive", func(t *testing.T) {
-		processE := &event{
-			EventType: eventTypeProcess,
-			BaseSpanProperties: instcontext.BaseSpanProperties{
-				StartTime: 10,
-				EndTime:   20,
-				SpanContext: instcontext.EBPFSpanContext{
-					TraceID: bpfTraceID,
-					SpanID:  processBPFSpanID,
-				},
-				ParentSpanContext: instcontext.EBPFSpanContext{
-					TraceID: bpfTraceID,
-					SpanID:  doReceiveBPFSpanID,
-				},
-			},
-			ContextPtr: 0, // process has no context
-		}
-
-		spans := processFn(processE)
-		require.Equal(t, 0, spans.Len(), "process event should be buffered")
-
-		doReceiveE := &event{
+	// enqueueEvent is the doReceive span (carries the app context) that both
+	// resolves its own TraceID and becomes the parent of the handling span.
+	enqueueEvent := func() *event {
+		return &event{
 			EventType: eventTypeDoReceive,
 			BaseSpanProperties: instcontext.BaseSpanProperties{
 				StartTime: 5,
@@ -144,85 +126,100 @@ func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
 					SpanID:  doReceiveBPFSpanID,
 				},
 			},
-			ContextPtr: 0x1234,
+			ContextPtr:    0x1234,
+			ReceiveCtxPtr: receiveCtxPtr,
 		}
-
-		spans = processFn(doReceiveE)
-		require.Equal(t, 2, spans.Len(), "doReceive should emit itself and the buffered process")
-
-		drSpan := spans.At(0)
-		require.Equal(t, "actor.doReceive", drSpan.Name())
-		require.Equal(t, appTraceID, trace.TraceID(drSpan.TraceID()))
-		require.Equal(t, appSpanID, trace.SpanID(drSpan.ParentSpanID()))
-
-		pSpan := spans.At(1)
-		require.Equal(t, "actor.process", pSpan.Name())
-		require.Equal(t, appTraceID, trace.TraceID(pSpan.TraceID()),
-			"process must inherit the userspace-resolved TraceID")
-		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(pSpan.ParentSpanID()),
-			"process parent should be doReceive's BPF SpanID")
-	})
-
-	t.Run("grain process buffered and resolved on grainDoReceive", func(t *testing.T) {
-		grainDRSpanID := trace.SpanID{0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77}
-		grainPSpanID := trace.SpanID{0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88}
-
-		grainProcessE := &event{
-			EventType: eventTypeGrainProcess,
+	}
+	// handlingEvent is the handleReceived span, on a different goroutine, with
+	// only the shared ReceiveCtxPtr to correlate it back to the enqueue span.
+	handlingEvent := func() *event {
+		return &event{
+			EventType: eventTypeProcess,
 			BaseSpanProperties: instcontext.BaseSpanProperties{
 				StartTime: 10,
 				EndTime:   20,
 				SpanContext: instcontext.EBPFSpanContext{
 					TraceID: bpfTraceID,
-					SpanID:  grainPSpanID,
-				},
-				ParentSpanContext: instcontext.EBPFSpanContext{
-					TraceID: bpfTraceID,
-					SpanID:  grainDRSpanID,
+					SpanID:  processBPFSpanID,
 				},
 			},
-			ContextPtr: 0,
+			ReceiveCtxPtr: receiveCtxPtr,
 		}
+	}
 
-		spans := processFn(grainProcessE)
-		require.Equal(t, 0, spans.Len())
+	assertLinked := func(t *testing.T, drSpan, pSpan ptrace.Span) {
+		t.Helper()
+		require.Equal(t, "actor.doReceive", drSpan.Name())
+		require.Equal(t, appTraceID, trace.TraceID(drSpan.TraceID()))
+		require.Equal(t, appSpanID, trace.SpanID(drSpan.ParentSpanID()))
 
-		grainDRE := &event{
-			EventType: eventTypeGrainDoReceive,
-			BaseSpanProperties: instcontext.BaseSpanProperties{
-				StartTime: 5,
-				EndTime:   25,
-				SpanContext: instcontext.EBPFSpanContext{
-					TraceID: bpfTraceID,
-					SpanID:  grainDRSpanID,
-				},
-			},
-			ContextPtr: 0x5678,
-		}
+		require.Equal(t, "actor.process", pSpan.Name())
+		require.Equal(t, appTraceID, trace.TraceID(pSpan.TraceID()),
+			"handling span must inherit the enqueue span's resolved TraceID")
+		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(pSpan.ParentSpanID()),
+			"handling span parent should be the enqueue span's SpanID")
+	}
 
-		spans = processFn(grainDRE)
-		require.Equal(t, 2, spans.Len())
+	t.Run("handling arrives before enqueue (buffered, resolved on enqueue)", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
 
-		require.Equal(t, appTraceID, trace.TraceID(spans.At(0).TraceID()))
-		require.Equal(t, appTraceID, trace.TraceID(spans.At(1).TraceID()))
+		spans := processFn(handlingEvent())
+		require.Equal(t, 0, spans.Len(), "handling event should be buffered until its enqueue arrives")
+
+		spans = processFn(enqueueEvent())
+		require.Equal(t, 2, spans.Len(), "enqueue should emit itself and the buffered handling span")
+		assertLinked(t, spans.At(0), spans.At(1))
 	})
 
-	t.Run("process without BPF parent is not buffered", func(t *testing.T) {
-		e := &event{
-			EventType: eventTypeProcess,
+	t.Run("enqueue arrives before handling (link resolved immediately)", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
+
+		spans := processFn(enqueueEvent())
+		require.Equal(t, 1, spans.Len(), "enqueue emits only itself")
+		drSpan := spans.At(0)
+
+		spans = processFn(handlingEvent())
+		require.Equal(t, 1, spans.Len(), "handling links immediately to the known enqueue span")
+		assertLinked(t, drSpan, spans.At(0))
+	})
+
+	t.Run("grain handling links to grain enqueue", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
+		const grainPtr = 0x5678
+
+		grainEnqueue := &event{
+			EventType: eventTypeGrainDoReceive,
 			BaseSpanProperties: instcontext.BaseSpanProperties{
-				StartTime: 1,
-				EndTime:   2,
-				SpanContext: instcontext.EBPFSpanContext{
-					TraceID: bpfTraceID,
-					SpanID:  trace.SpanID{0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99},
-				},
+				StartTime: 5, EndTime: 25,
+				SpanContext: instcontext.EBPFSpanContext{TraceID: bpfTraceID, SpanID: doReceiveBPFSpanID},
 			},
-			ContextPtr: 0,
+			ContextPtr:    0x9999,
+			ReceiveCtxPtr: grainPtr,
+		}
+		grainHandling := &event{
+			EventType: eventTypeGrainProcess,
+			BaseSpanProperties: instcontext.BaseSpanProperties{
+				StartTime: 10, EndTime: 20,
+				SpanContext: instcontext.EBPFSpanContext{TraceID: bpfTraceID, SpanID: processBPFSpanID},
+			},
+			ReceiveCtxPtr: grainPtr,
 		}
 
+		require.Equal(t, 1, processFn(grainEnqueue).Len())
+		spans := processFn(grainHandling)
+		require.Equal(t, 1, spans.Len())
+		require.Equal(t, "grain.process", spans.At(0).Name())
+		require.Equal(t, appTraceID, trace.TraceID(spans.At(0).TraceID()))
+		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(spans.At(0).ParentSpanID()))
+	})
+
+	t.Run("handling without a correlation pointer emits immediately", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
+		e := handlingEvent()
+		e.ReceiveCtxPtr = 0
+
 		spans := processFn(e)
-		require.Equal(t, 1, spans.Len(), "process without BPF parent should emit immediately")
+		require.Equal(t, 1, spans.Len(), "handling with no ReceiveCtxPtr should emit immediately")
 		require.Equal(t, "actor.process", spans.At(0).Name())
 	})
 }

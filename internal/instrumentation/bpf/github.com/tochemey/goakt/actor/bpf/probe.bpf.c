@@ -87,6 +87,12 @@ struct goakt_actor_span_t {
 	u8 padding[6];
 	BASE_SPAN_PROPERTIES
 	u64 context_ptr; /* context.Context data pointer for userspace trace extraction */
+	/* Pointer to the *ReceiveContext / *GrainContext this span belongs to.
+	 * The same pointer flows through the mailbox from the enqueue probe
+	 * (doReceive/receive) to the handling probe (handleReceived/
+	 * handleGrainContext), which run on different goroutines in GoAkt v4.
+	 * Userspace uses it to link the handling span under its enqueue span. */
+	u64 receive_ctx_ptr;
 };
 
 struct uprobe_data_t {
@@ -573,6 +579,17 @@ static __always_inline bool actor_reentered(void *map, void *key) {
 	return false;
 }
 
+// set_receive_ctx_ptr records the *ReceiveContext / *GrainContext pointer on the
+// span just stored in map for key, so userspace can correlate the enqueue span
+// (doReceive/receive) with the handling span (handleReceived/handleGrainContext)
+// that carries the same pointer.
+static __always_inline void set_receive_ctx_ptr(void *map, void *key, u64 ptr) {
+	struct uprobe_data_t *d = bpf_map_lookup_elem(map, &key);
+	if (d != NULL) {
+		d->span.receive_ctx_ptr = ptr;
+	}
+}
+
 // Context extraction params: context_pos 0 = no context (e.g. process()).
 // passed_as_arg: 1 = context.Context as direct arg, 0 = context inside struct.
 static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
@@ -680,6 +697,7 @@ int uprobe_doReceive(struct pt_regs *ctx) {
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_DO_RECEIVE,
 			    &goakt_actor_do_receive, 2,
 			    receive_context_ctx_offset, false);
+	set_receive_ctx_ptr(&goakt_actor_do_receive, key, (u64)get_argument(ctx, 2));
 	return 0;
 }
 
@@ -744,9 +762,11 @@ int uprobe_handleRemoteAsk_Returns(struct pt_regs *ctx) {
 	return 0;
 }
 
-// --- (*PID).process ---
-SEC("uprobe/process")
-int uprobe_process(struct pt_regs *ctx) {
+// --- (*PID).handleReceived --- (actual message handling on a dispatcher
+// worker goroutine; the "actor.process" span). Its parent is the doReceive
+// (enqueue) span, resolved in userspace via the shared *ReceiveContext pointer.
+SEC("uprobe/handleReceived")
+int uprobe_handleReceived(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	if (actor_reentered(&goakt_actor_process, key)) {
 		return 0;
@@ -761,46 +781,21 @@ int uprobe_process(struct pt_regs *ctx) {
 
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_PROCESS,
 			    &goakt_actor_process, 0, 0, false);
+	set_receive_ctx_ptr(&goakt_actor_process, key, (u64)get_argument(ctx, 2));
 	return 0;
 }
 
-SEC("uprobe/process_Returns")
-int uprobe_process_Returns(struct pt_regs *ctx) {
+SEC("uprobe/handleReceived_Returns")
+int uprobe_handleReceived_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	finish_span_and_output(ctx, key, &goakt_actor_process);
 	return 0;
 }
 
-// --- (*grainPID).process ---
-SEC("uprobe/grainPID_process")
-int uprobe_grainPID_process(struct pt_regs *ctx) {
-	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_grain_process, key)) {
-		return 0;
-	}
-
-	u32 map_id = 0;
-	struct uprobe_data_t *uprobe_data =
-		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
-	if (uprobe_data == NULL) {
-		return 0;
-	}
-
-	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_PROCESS,
-			    &goakt_actor_grain_process, 0, 0, false);
-	return 0;
-}
-
-SEC("uprobe/grainPID_process_Returns")
-int uprobe_grainPID_process_Returns(struct pt_regs *ctx) {
-	void *key = (void *)GOROUTINE(ctx);
-	finish_span_and_output(ctx, key, &goakt_actor_grain_process);
-	return 0;
-}
-
-// --- (*grainPID).handleGrainContext ---
-SEC("uprobe/handleGrainContext")
-int uprobe_handleGrainContext(struct pt_regs *ctx) {
+// --- (*grainPID).receive --- (enqueue into the grain mailbox on the caller's
+// goroutine; the "grain.doReceive" span, parent of the grain handling span).
+SEC("uprobe/grainReceive")
+int uprobe_grainReceive(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	if (actor_reentered(&goakt_actor_grain_do_receive, key)) {
 		return 0;
@@ -816,13 +811,44 @@ int uprobe_handleGrainContext(struct pt_regs *ctx) {
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_DO_RECEIVE,
 			    &goakt_actor_grain_do_receive, 2,
 			    grain_context_ctx_offset, false);
+	set_receive_ctx_ptr(&goakt_actor_grain_do_receive, key, (u64)get_argument(ctx, 2));
+	return 0;
+}
+
+SEC("uprobe/grainReceive_Returns")
+int uprobe_grainReceive_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	finish_span_and_output(ctx, key, &goakt_actor_grain_do_receive);
+	return 0;
+}
+
+// --- (*grainPID).handleGrainContext --- (actual grain handling on a dispatcher
+// worker goroutine; the "grain.process" span, linked under grain.doReceive via
+// the shared *GrainContext pointer).
+SEC("uprobe/handleGrainContext")
+int uprobe_handleGrainContext(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (actor_reentered(&goakt_actor_grain_process, key)) {
+		return 0;
+	}
+
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_PROCESS,
+			    &goakt_actor_grain_process, 0, 0, false);
+	set_receive_ctx_ptr(&goakt_actor_grain_process, key, (u64)get_argument(ctx, 2));
 	return 0;
 }
 
 SEC("uprobe/handleGrainContext_Returns")
 int uprobe_handleGrainContext_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	finish_span_and_output(ctx, key, &goakt_actor_grain_do_receive);
+	finish_span_and_output(ctx, key, &goakt_actor_grain_process);
 	return 0;
 }
 
@@ -1626,12 +1652,16 @@ SEC("uprobe/handleReceivedError")
 int uprobe_handleReceivedError(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 
-	struct uprobe_data_t *uprobe_data =
-		bpf_map_lookup_elem(&goakt_actor_do_receive, &key);
-	if (uprobe_data == NULL) {
-		return 0;
+	/* handleReceivedError runs either on the sender goroutine (enqueue errors,
+	 * doReceive span) or on a dispatcher worker (handling errors, process
+	 * span). Mark whichever span is active on this goroutine. */
+	struct uprobe_data_t *d = bpf_map_lookup_elem(&goakt_actor_do_receive, &key);
+	if (d != NULL) {
+		d->span.handled_successfully = 0;
 	}
-
-	uprobe_data->span.handled_successfully = 0;
+	d = bpf_map_lookup_elem(&goakt_actor_process, &key);
+	if (d != NULL) {
+		d->span.handled_successfully = 0;
+	}
 	return 0;
 }

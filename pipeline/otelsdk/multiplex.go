@@ -27,7 +27,7 @@ type sharedSpanProcessor struct {
 }
 
 func (p sharedSpanProcessor) Shutdown(ctx context.Context) error {
-	return p.SpanProcessor.ForceFlush(ctx)
+	return p.ForceFlush(ctx)
 }
 
 // Multiplexer supports sending telemetry from multiple resources through the

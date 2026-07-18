@@ -39,7 +39,7 @@ goakt-ebpf is a standalone eBPF agent that instruments [GoAkt](https://github.co
 2. **Capture**: On function entry, eBPF allocates a span slot (keyed by goroutine ID), records start time, generates span/trace IDs. On function return (or `handleReceivedError` for failure), eBPF records end time and outputs the span via perf buffer.
 3. **Correlate (Go-side)**: For each perf event, the span processor resolves parent context through two mechanisms:
    - **Userspace context reading**: When `context_ptr` is non-zero, reads the target process memory via `process_vm_readv(2)` to extract an OTEL span from the app's `context.Context` chain. Overrides the BPF-assigned TraceID/ParentSpanID with the app's values.
-   - **Event buffering**: `process`/`grainProcess` events arrive before their parent `doReceive` (inner function returns first). These are buffered until the parent is processed and resolves its TraceID, then emitted together with the corrected TraceID.
+   - **Enqueue/handling correlation**: GoAkt v4 delivers a message by enqueueing it (`doReceive`/`receive`, on the caller goroutine) and later handling it on a dispatcher worker (`handleReceived`/`handleGrainContext`, a different goroutine). The two share the `*ReceiveContext`/`*GrainContext` pointer, emitted as `receive_ctx_ptr`. The enqueue span resolves its own app-level trace, and the handling span inherits that TraceID and is parented under it. See [Enqueue/Handling Correlation](#enqueuehandling-correlation).
 4. **Export**: Converts events to OTLP spans and exports to configured endpoint (e.g. OTel Collector, Jaeger).
 
 ## Probe Model
@@ -56,13 +56,15 @@ Full reference of probe targets, span names, and attributes. Symbols use the ful
 
 ### Message handling (PID)
 
-| Symbol                           | Span                     | Attributes                                                  |
-|----------------------------------|--------------------------|-------------------------------------------------------------|
-| `(*PID).doReceive`               | actor.doReceive          | received_timestamp, handled_timestamp, handled_successfully |
-| `(*PID).process`                 | actor.process            | actor.type=pid                                              |
-| `(*grainPID).handleGrainContext` | grain.doReceive          | received_timestamp, handled_timestamp, handled_successfully |
-| `(*grainPID).process`            | grain.process            | actor.type=grain                                            |
-| `(*PID).handleReceivedError`     | (marks doReceive failed) | handled_successfully=false                                  |
+GoAkt v4 message handling is asynchronous: the message is enqueued into the actor's mailbox on the caller's goroutine, then handled later on a dispatcher worker goroutine. The enqueue produces the `doReceive` span and the handling produces the `process` span; the two are linked by the shared `*ReceiveContext`/`*GrainContext` pointer (see [Enqueue/Handling Correlation](#enqueuehandling-correlation)).
+
+| Symbol                           | Span                     | Role    | Attributes                                                  |
+|----------------------------------|--------------------------|---------|-------------------------------------------------------------|
+| `(*PID).doReceive`               | actor.doReceive          | enqueue | received_timestamp, handled_timestamp, handled_successfully |
+| `(*PID).handleReceived`          | actor.process            | handle  | actor.type=pid                                              |
+| `(*grainPID).receive`            | grain.doReceive          | enqueue | received_timestamp, handled_timestamp, handled_successfully |
+| `(*grainPID).handleGrainContext` | grain.process            | handle  | actor.type=grain                                            |
+| `(*PID).handleReceivedError`     | (marks active span failed) | —     | handled_successfully=false                                  |
 
 ### Local messaging (PID)
 
@@ -198,7 +200,7 @@ A `goid_to_span_context` eBPF map (key: goroutine ID, value: span_context) propa
 
 Same-symbol re-entry on one goroutine is tracked with a nesting depth counter in the per-probe map value: the entry probe bumps the depth instead of overwriting, and the return probe only emits the span (with its true end time) once the depth returns to zero. The per-probe and goid maps are `BPF_MAP_TYPE_LRU_HASH`, so an entry orphaned by a return that never fires (e.g. a probed function unwound by a Go panic) is evicted under pressure rather than eventually wedging the probe when it reaches capacity.
 
-This gives `actor.process` a BPF-level parent link to `actor.doReceive` (both run on the same goroutine). However, the BPF-assigned TraceID may differ from the app's TraceID because `doReceive`'s TraceID is overridden later by userspace context extraction. The Go-side event buffering in `makeProcessFn` resolves this: `process` events are buffered until the parent `doReceive` event is processed, then emitted with the corrected TraceID (see [Event Buffering](#event-buffering)).
+This links nested calls that share a goroutine (e.g. a call the actor makes while handling a message). It does not connect the enqueue and handling spans, which run on different goroutines in GoAkt v4; that link is made through the shared `*ReceiveContext` pointer instead (see [Enqueue/Handling Correlation](#enqueuehandling-correlation)).
 
 The goid map does not connect spans across goroutines (e.g. remoting goroutine to actor goroutine).
 
@@ -280,22 +282,17 @@ This connects goakt-ebpf spans to application-level OTEL spans (HTTP, gRPC, manu
 - Auto SDK parent extraction requires eBPF-level probes (not supported via the userspace reader).
 - Requires `CAP_SYS_PTRACE` (already required for uprobes).
 
-### Event Buffering
+### Enqueue/Handling Correlation
 
-In GoAkt, `process()` is called from within `doReceive()`. Because `process` returns first (inner function), BPF emits events in this order:
+GoAkt v4 handles a message asynchronously. `doReceive` (for actors) and `receive` (for grains) run on the caller's goroutine and only enqueue the message into the mailbox. A dispatcher worker later handles it on a different goroutine via `handleReceived` (actors) or `handleGrainContext` (grains). So the `doReceive`/`process` parent-child pair no longer share a goroutine, and the goid map cannot link them.
 
-1. `actor.process` event (inner return)
-2. `actor.doReceive` event (outer return)
-
-When `doReceive` is processed Go-side, userspace context extraction overrides its TraceID with the app's TraceID. But by then, `actor.process` would already have been emitted with the stale BPF-assigned TraceID — placing it in a different trace.
-
-`makeProcessFn` in `probe.go` solves this by buffering `process`/`grainProcess` events that have a BPF parent (from the goid map) but no context pointer (`context_pos=0`). When the parent `doReceive` event arrives and resolves the correct TraceID via userspace extraction, the buffered child is fixed up and emitted together:
+The link is made through the `*ReceiveContext`/`*GrainContext` pointer, which is the same object from enqueue to handling (it flows through the mailbox unchanged). Both probes emit it as `receive_ctx_ptr`. The enqueue span resolves its own app-level trace via userspace context reading; `makeProcessFn` records that resolved `{TraceID, SpanID}` keyed by the pointer, and the handling span inherits the TraceID and is parented under the enqueue span's SpanID:
 
 ```
-Event arrival:
-  1. process event (BPF parent = doReceive SpanID) → buffered
-  2. doReceive event (context_ptr set)             → userspace extraction → app TraceID
-     └── resolves buffered process                 → override TraceID → emit both
+Event arrival (usual order):
+  1. doReceive event (context_ptr + receive_ctx_ptr set) → userspace extraction → app TraceID
+     └── record link[receive_ctx_ptr] = {app TraceID, doReceive SpanID}, emit doReceive
+  2. handleReceived event (receive_ctx_ptr set)          → look up link → inherit TraceID + parent, emit
 
 Result:
   app_span (app TraceID)
@@ -303,14 +300,14 @@ Result:
           └── actor.process (app TraceID, parent = doReceive)
 ```
 
-The buffer is bounded (`maxPending = 256`). On overflow the oldest buffered parent's entries are evicted (FIFO) and logged, rather than clearing the whole buffer, and each parent can hold more than one buffered child. Events are processed serially in `SpanProducer.Run`, so no locking is needed. If `doReceive` never arrives (e.g. probe failure), the buffered process events for that parent are eventually evicted as newer events fill the buffer.
+The perf ring does not guarantee cross-CPU ordering, so a handling event may arrive before its enqueue. In that case the handling event is buffered by `receive_ctx_ptr` and emitted when the enqueue resolves the link. Both the link map and the pending-handling buffer are bounded (`maxEntries = 512`) with arbitrary-entry eviction (logged) on overflow. Events are processed serially in `SpanProducer.Run`, so no locking is needed. If an enqueue never produces a handling (message dropped), its link entry is eventually evicted as newer entries fill the map. A handling event whose `receive_ctx_ptr` is zero (correlation unavailable) is emitted immediately as an unlinked span.
 
 ### Context Extraction by Method
 
 | Symbol                            | Context source | `passed_as_arg` | `context_pos` | `context_offset`                |
 |-----------------------------------|----------------|-----------------|---------------|---------------------------------|
 | `(*PID).doReceive`                | ReceiveContext | false           | 2             | DWARF: `ReceiveContext.ctx`     |
-| `(*grainPID).handleGrainContext`  | GrainContext   | false           | 2             | DWARF: `GrainContext.ctx`       |
+| `(*grainPID).receive`             | GrainContext   | false           | 2             | DWARF: `GrainContext.ctx`       |
 | `(*actorSystem).handleRemoteTell` | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).handleRemoteAsk`  | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).Spawn`            | Direct arg     | true            | 2             | 0                               |
@@ -320,8 +317,8 @@ The buffer is bounded (`maxPending = 256`). On overflow the oldest buffered pare
 | `(*actorSystem).remoteTellGrain`  | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).remoteAskGrain`   | Direct arg     | true            | 2             | 0                               |
 | `(*relocator).Relocate`           | Direct arg     | true            | 2             | 0                               |
-| `(*PID).process`                  | No context     | —               | 0             | —                               |
-| `(*grainPID).process`             | No context     | —               | 0             | —                               |
+| `(*PID).handleReceived`           | No context     | —               | 0             | —                               |
+| `(*grainPID).handleGrainContext`  | No context     | —               | 0             | —                               |
 
 ## Dependencies
 

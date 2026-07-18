@@ -148,23 +148,30 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					ReturnProbe: "uprobe_handleRemoteAsk_Returns",
 				},
 				{
-					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).process",
-					EntryProbe:  "uprobe_process",
-					ReturnProbe: "uprobe_process_Returns",
+					// GoAkt v4 processes a message on a dispatcher worker via
+					// handleReceived; this is the "actor.process" span, linked
+					// under doReceive in userspace via the shared ReceiveContext.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceived",
+					EntryProbe:  "uprobe_handleReceived",
+					ReturnProbe: "uprobe_handleReceived_Returns",
 					// Unexported, so it may be renamed/inlined between GoAkt
 					// releases; a miss must not abort the whole probe load.
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
-					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).process",
-					EntryProbe:  "uprobe_grainPID_process",
-					ReturnProbe: "uprobe_grainPID_process_Returns",
+					// Enqueue into the grain mailbox; the "grain.doReceive" span.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).receive",
+					EntryProbe:  "uprobe_grainReceive",
+					ReturnProbe: "uprobe_grainReceive_Returns",
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
+					// Actual grain handling on a dispatcher worker; the
+					// "grain.process" span, linked under grain.doReceive.
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*grainPID).handleGrainContext",
 					EntryProbe:  "uprobe_handleGrainContext",
 					ReturnProbe: "uprobe_handleGrainContext_Returns",
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).Spawn",
@@ -510,63 +517,99 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 	}
 }
 
-// makeProcessFn returns a processFn that uses userspace context reading when
-// targetPID > 0. It buffers process/grainProcess events whose BPF parent
-// (doReceive) has not yet been processed — since process() is an inner call
-// that returns before doReceive(), its event always arrives first. When the
-// parent doReceive event arrives and resolves the app-level TraceID via
-// userspace extraction, the buffered child is fixed up and emitted together.
+// parentLink is the resolved trace context of an enqueue (doReceive/receive)
+// span, used as the parent of the matching handling span.
+type parentLink struct {
+	traceID pcommon.TraceID
+	spanID  pcommon.SpanID
+}
+
+// makeProcessFn returns a processFn that correlates each handling span
+// (handleReceived/handleGrainContext, on a dispatcher worker goroutine) with
+// its enqueue span (doReceive/receive, on the caller goroutine). GoAkt v4
+// processes messages asynchronously, so the two run on different goroutines and
+// cannot be linked by goroutine ID; instead they share the *ReceiveContext /
+// *GrainContext pointer, which the probes emit as ReceiveCtxPtr.
+//
+// The enqueue span resolves its own app-level trace via userspace context
+// reading, then the handling span inherits that TraceID and is parented under
+// it. The enqueue event normally arrives first, but the perf ring does not
+// guarantee cross-CPU ordering, so a handling event that arrives before its
+// enqueue is buffered until the enqueue resolves the link.
 func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanSlice {
-	// BPF parent SpanID → buffered children. A single doReceive can produce
-	// more than one process child before its own event arrives, so values
-	// are slices rather than a single event.
-	pending := make(map[pcommon.SpanID][]event)
-	const maxPending = 256
+	links := make(map[uint64]parentLink) // ReceiveCtxPtr → resolved enqueue span
+	pending := make(map[uint64][]event)  // ReceiveCtxPtr → handling events awaiting enqueue
+	const maxEntries = 512
+
+	// evictOne drops an arbitrary entry to bound a map when it is full.
+	evictOne := func(m map[uint64][]event) {
+		for k := range m {
+			delete(m, k)
+			return
+		}
+	}
+
+	emitHandling := func(h *event, p parentLink) ptrace.SpanSlice {
+		spans := processEvent(h, logger, targetPID)
+		if spans.Len() > 0 {
+			spans.At(0).SetTraceID(p.traceID)
+			spans.At(0).SetParentSpanID(p.spanID)
+		}
+		return spans
+	}
 
 	return func(e *event) ptrace.SpanSlice {
-		if isProcessWithBPFParent(e) {
-			key := pcommon.SpanID(e.ParentSpanContext.SpanID)
-			// Drop one buffered parent rather than wiping the whole buffer
-			// when full (the parent whose doReceive never arrived); any
-			// eviction is enough to bound the buffer.
-			if _, ok := pending[key]; !ok && len(pending) >= maxPending {
-				for k, dropped := range pending {
-					logger.Debug("pending process buffer full, dropping buffered spans",
-						"parent_span_id", k, "dropped", len(dropped))
-					delete(pending, k)
-					break
-				}
-			}
-			pending[key] = append(pending[key], *e)
-			return ptrace.NewSpanSlice()
-		}
-
-		spans := processEvent(e, logger, targetPID)
-
-		if len(pending) > 0 {
-			myID := pcommon.SpanID(e.SpanContext.SpanID)
-			if buffered, ok := pending[myID]; ok {
-				for i := range buffered {
-					child := processEvent(&buffered[i], logger, targetPID)
-					if child.Len() > 0 && spans.Len() > 0 {
-						child.At(0).SetTraceID(spans.At(0).TraceID())
-						child.MoveAndAppendTo(spans)
+		switch {
+		case isEnqueueEvent(e):
+			spans := processEvent(e, logger, targetPID)
+			if e.ReceiveCtxPtr != 0 && spans.Len() > 0 {
+				p := parentLink{spans.At(0).TraceID(), spans.At(0).SpanID()}
+				if _, ok := links[e.ReceiveCtxPtr]; !ok && len(links) >= maxEntries {
+					for k := range links {
+						delete(links, k)
+						break
 					}
 				}
-				delete(pending, myID)
+				links[e.ReceiveCtxPtr] = p
+				if buffered, ok := pending[e.ReceiveCtxPtr]; ok {
+					for i := range buffered {
+						emitHandling(&buffered[i], p).MoveAndAppendTo(spans)
+					}
+					delete(pending, e.ReceiveCtxPtr)
+				}
 			}
-		}
+			return spans
 
-		return spans
+		case isHandlingEvent(e):
+			if p, ok := links[e.ReceiveCtxPtr]; ok {
+				delete(links, e.ReceiveCtxPtr)
+				return emitHandling(e, p)
+			}
+			// Enqueue not seen yet (cross-CPU reorder): buffer until it arrives.
+			if _, ok := pending[e.ReceiveCtxPtr]; !ok && len(pending) >= maxEntries {
+				logger.Debug("pending handling buffer full, dropping buffered spans")
+				evictOne(pending)
+			}
+			pending[e.ReceiveCtxPtr] = append(pending[e.ReceiveCtxPtr], *e)
+			return ptrace.NewSpanSlice()
+
+		default:
+			return processEvent(e, logger, targetPID)
+		}
 	}
 }
 
-// isProcessWithBPFParent reports whether the event is a contextless process
-// span (context_pos=0) that obtained its parent from the BPF goid map.
-func isProcessWithBPFParent(e *event) bool {
+// isEnqueueEvent reports whether the event is an enqueue span (doReceive or
+// grain receive) that carries a correlation pointer for a handling span.
+func isEnqueueEvent(e *event) bool {
+	return e.EventType == eventTypeDoReceive || e.EventType == eventTypeGrainDoReceive
+}
+
+// isHandlingEvent reports whether the event is a handling span (process or
+// grainProcess) that must be linked to its enqueue span via ReceiveCtxPtr.
+func isHandlingEvent(e *event) bool {
 	return (e.EventType == eventTypeProcess || e.EventType == eventTypeGrainProcess) &&
-		e.ParentSpanContext.SpanID.IsValid() &&
-		e.ContextPtr == 0
+		e.ReceiveCtxPtr != 0
 }
 
 // event represents an instrumentation event (layout must match C struct goakt_actor_span_t).
@@ -575,7 +618,8 @@ type event struct {
 	HandledSuccessfully uint8
 	_                   [6]byte // padding for alignment
 	context.BaseSpanProperties
-	ContextPtr uint64 // context.Context data pointer for userspace trace extraction (0 when N/A)
+	ContextPtr    uint64 // context.Context data pointer for userspace trace extraction (0 when N/A)
+	ReceiveCtxPtr uint64 // *ReceiveContext/*GrainContext pointer correlating enqueue and handling spans
 }
 
 // baseAttrs is shared to avoid per-span allocation.
