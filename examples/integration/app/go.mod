@@ -3,7 +3,7 @@ module github.com/tochemey/goakt-ebpf/testdata/integration/app
 go 1.26.0
 
 require (
-	github.com/tochemey/goakt/v4 v4.4.4-0.20260814201539-d11974bdc9ef
+	github.com/tochemey/goakt/v4 v4.5.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0
