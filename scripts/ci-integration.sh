@@ -12,12 +12,12 @@ AGENT_PID=""
 cleanup() {
   [[ -n "$AGENT_PID" ]] && sudo kill $AGENT_PID 2>/dev/null || true
   [[ -n "$APP_PID" ]] && kill $APP_PID 2>/dev/null || true
-  docker compose -f examples/integration/docker-compose.backend.yml down -v 2>/dev/null || true
+  docker compose -f examples/integration/docker-compose.yml down -v 2>/dev/null || true
 }
 trap cleanup EXIT
 
-echo "=== Starting backend (collector + Jaeger) ==="
-docker compose -f examples/integration/docker-compose.backend.yml up -d
+echo "=== Starting integration Compose stack ==="
+docker compose -f examples/integration/docker-compose.yml up -d
 sleep 5
 
 echo "=== Building integration app ==="

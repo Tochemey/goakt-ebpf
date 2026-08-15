@@ -14,7 +14,7 @@ import (
 func TestProcessEventParentPrecedence(t *testing.T) {
 	logger := slog.Default()
 
-	t.Run("prefers parent from kernel event over context extraction", func(t *testing.T) {
+	t.Run("prefers userspace context over kernel parent when both exist", func(t *testing.T) {
 		origExtract := extractParentSpanFromContext
 		t.Cleanup(func() { extractParentSpanFromContext = origExtract })
 
@@ -49,9 +49,9 @@ func TestProcessEventParentPrecedence(t *testing.T) {
 		require.Equal(t, 1, spans.Len())
 		span := spans.At(0)
 
-		require.Equal(t, 0, calls, "context extraction should not run when eBPF parent is present")
-		require.Equal(t, e.ParentSpanContext.SpanID, trace.SpanID(span.ParentSpanID()))
-		require.Equal(t, e.SpanContext.TraceID, trace.TraceID(span.TraceID()))
+		require.Equal(t, 1, calls, "context extraction should run even when an eBPF parent is present")
+		require.Equal(t, extracted.SpanID(), trace.SpanID(span.ParentSpanID()))
+		require.Equal(t, extracted.TraceID(), trace.TraceID(span.TraceID()))
 	})
 
 	t.Run("uses context extraction when kernel parent is absent", func(t *testing.T) {
@@ -221,5 +221,32 @@ func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
 		spans := processFn(e)
 		require.Equal(t, 1, spans.Len(), "handling with no ReceiveCtxPtr should emit immediately")
 		require.Equal(t, "actor.process", spans.At(0).Name())
+	})
+
+	t.Run("duplicate enqueue for the same pointer is ignored", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
+
+		require.Equal(t, 1, processFn(enqueueEvent()).Len())
+		require.Equal(t, 0, processFn(enqueueEvent()).Len(),
+			"build+doReceive both emit doReceive for the same *ReceiveContext")
+
+		spans := processFn(handlingEvent())
+		require.Equal(t, 1, spans.Len())
+		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(spans.At(0).ParentSpanID()))
+	})
+
+	t.Run("pooled pointer attaches only one pending handling span", func(t *testing.T) {
+		processFn := makeProcessFn(slog.Default(), 42)
+
+		require.Equal(t, 0, processFn(handlingEvent()).Len())
+		second := handlingEvent()
+		second.BaseSpanProperties.SpanContext.SpanID = trace.SpanID{0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77}
+		require.Equal(t, 0, processFn(second).Len())
+
+		spans := processFn(enqueueEvent())
+		require.Equal(t, 2, spans.Len(), "enqueue should emit itself and exactly one buffered handling span")
+		require.Equal(t, "actor.doReceive", spans.At(0).Name())
+		require.Equal(t, "actor.process", spans.At(1).Name())
+		require.Equal(t, processBPFSpanID, trace.SpanID(spans.At(1).SpanID()))
 	})
 }

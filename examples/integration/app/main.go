@@ -75,15 +75,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/echo", otelhttp.NewHandler(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := actor.Tell(r.Context(), echo, "hello"); err != nil {
+			if err := actor.Tell(extractableContext(r), echo, "hello"); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello\n"))
 		}), "GET /echo"))
 	mux.Handle("/ask", otelhttp.NewHandler(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if _, err := actor.Ask(r.Context(), pong, "ping", 2*time.Second); err != nil {
+			if _, err := actor.Ask(extractableContext(r), pong, "ping", 2*time.Second); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -109,6 +109,15 @@ func main() {
 			sendMessages(ctx, tracer, echo, pong)
 		}
 	}
+}
+
+// extractableContext re-binds the otelhttp span onto a valueCtx under
+// WithoutCancel. That is the same layout tracer.Start produces, which the
+// eBPF userspace reader can walk. The raw request context is a cancelCtx
+// chain that the reader often misses, leaving GET /echo and GET /ask as
+// single-span traces.
+func extractableContext(r *http.Request) context.Context {
+	return trace.ContextWithSpan(context.WithoutCancel(r.Context()), trace.SpanFromContext(r.Context()))
 }
 
 func envInt(key string, defaultVal int) int {

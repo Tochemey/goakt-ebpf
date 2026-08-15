@@ -118,22 +118,51 @@ docker compose -f examples/integration/docker-compose.yml up --build
 
 | Service            | Purpose                                     | Ports       |
 |--------------------|---------------------------------------------|-------------|
-| **goakt-app**      | Minimal GoAkt app (Tell/Ask between actors) | 8080 (HTTP) |
+| **goakt-app**      | Minimal GoAkt app (Tell/Ask between actors) | 8081 (HTTP) |
 | **goakt-ebpf**     | eBPF agent attaching to goakt-app           | —           |
-| **otel-collector** | Receives OTLP traces, forwards to Jaeger    | 4317, 4318  |
-| **jaeger**         | Trace visualization                         | 16686 (UI)  |
+| **SigNoz**         | Trace ingestion and visualization           | 8080 (UI), 4317/4318 (OTLP) |
 
-## 🎯 View Traces
+## 🎯 View Traces in SigNoz
 
-1. Open http://localhost:16686 (Jaeger UI)
-2. Select service `goakt-ebpf`
-3. Click **Find Traces**
+From the repository root, use only:
 
-The app sends Tell and Ask messages every 5 seconds (so the agent, which attaches after ~3s, can capture them). It also runs an HTTP server on port 8080 — curl `http://localhost:8080/echo` and `http://localhost:8080/ask` to generate otelhttp spans. Spans should appear within 10–15 seconds.
+```bash
+make build
+make start
+make view
+```
 
-**Validate span connections in stdout:** Set `OTEL_TRACES_STDOUT=1` for the app and/or agent to log spans (with TraceID, SpanID, ParentSpanID) to stdout for validating parent-child relationships.
+`make start` automatically calls `GET /echo` and `GET /ask`. To create more
+traces manually:
 
-**No services in Jaeger?** Run `make diagnose` to check DOCKER_HOST and agent logs. See [Troubleshooting](#troubleshooting).
+```bash
+curl http://localhost:8081/echo
+curl http://localhost:8081/ask
+```
+
+In SigNoz at http://localhost:8080:
+
+1. Open **Services** and select `integration-app`.
+2. Open a `GET /echo` or `GET /ask` trace.
+3. Expand the trace tree to see `actor.doReceive` and `actor.process` spans
+   from `goakt-ebpf`.
+
+### SigNoz login
+
+The integration stack provisions a local administrator automatically:
+
+- **Email:** `admin@goakt.local`
+- **Password:** `GoAkt-eBPF-2026!`
+
+Log in at [http://localhost:8080](http://localhost:8080). These credentials
+are intended only for this local development environment; do not reuse them
+elsewhere.
+
+The `SIGNOZ_TOKENIZER_JWT_SECRET` value in the Compose configuration is an
+internal token-signing secret, not a login password.
+
+The first `make start` downloads the SigNoz images and may take several
+minutes. Docker should have at least 4 GB of memory available.
 
 ### Trace validation (CI)
 

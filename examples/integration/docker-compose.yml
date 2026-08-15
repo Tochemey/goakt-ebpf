@@ -1,72 +1,56 @@
-# Integration example: GoAkt app, goakt-ebpf agent, OTel Collector, Jaeger
-# Run from repo root: docker compose -f examples/integration/docker-compose.yml up --build
-# View traces: http://localhost:16686
+include:
+  - path: .signoz/deploy/docker/.goakt-compose.yaml
 
 services:
-  # OpenTelemetry Collector - receives traces from the agent, forwards to Jaeger
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-    ports:
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
-    networks:
-      - goakt-ebpf-net
-
-  # Jaeger - trace visualization (http://localhost:16686)
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    ports:
-      - "16686:16686" # UI
-    networks:
-      - goakt-ebpf-net
-
-  # GoAkt app with OTEL tracing — target for eBPF instrumentation
   goakt-app:
-    container_name: goakt-app
+    container_name: signoz-integration-app
     build:
       context: .
       dockerfile: Dockerfile.app
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_SERVICE_NAME: integration-app
-      HTTP_PORT: 8080
-      # OTEL_TRACES_STDOUT: "1"  # Uncomment to log spans to stdout for validating parent-child connections
+      HTTP_PORT: 8081
     ports:
-      - "8080:8080" # HTTP server for otelhttp validation (curl localhost:8080/echo, /ask)
-    depends_on:
-      - otel-collector
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - goakt-ebpf-net
     stdin_open: true
     tty: true
 
-  # goakt-ebpf agent - attaches to goakt-app, exports traces to collector
-  # Requires Linux host (eBPF does not work in Docker Desktop on macOS/Windows)
   goakt-ebpf:
+    init: true
     build:
       context: ../..
       dockerfile: Dockerfile
-    privileged: true # Required for eBPF uprobe attachment to target process
+    privileged: true
+    user: root
     environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_SERVICE_NAME: goakt-ebpf
-      # OTEL_TRACES_STDOUT: "1"  # Uncomment to log spans to stdout for validating parent-child connections
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      - otel-collector
       - goakt-app
-    pid: "container:goakt-app" # Share PID namespace to attach to app
+    pid: "container:signoz-integration-app"
     networks:
       - goakt-ebpf-net
-    # Wait for goakt-app to be ready, then attach (app is PID 1 in shared PID namespace)
     entrypoint:
       ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]
+
+  # Local demo credentials for the self-hosted SigNoz instance.
+  # SigNoz enforces: >=12 chars with upper, lower, digit, and symbol.
+  # Do not reuse this password outside this integration environment.
+  signoz:
+    environment:
+      SIGNOZ_USER_ROOT_ENABLED: "true"
+      SIGNOZ_USER_ROOT_EMAIL: admin@goakt.local
+      SIGNOZ_USER_ROOT_PASSWORD: GoAkt-eBPF-2026!
+      SIGNOZ_USER_ROOT_ORG_NAME: default
 
 networks:
   goakt-ebpf-net:

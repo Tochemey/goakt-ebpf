@@ -115,6 +115,15 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_do_receive SEC(".maps");
 
+/* Separate from do_receive so a missed uretprobe on one symbol cannot
+ * swallow the other. Both emit EVENT_TYPE_DO_RECEIVE; userspace dedupes. */
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_receive_ctx_build SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, void *);
@@ -567,16 +576,43 @@ static long get_parent_span_context_goid_first(void *handle, struct span_context
 	return -1;
 }
 
+/* An active same-symbol entry older than this indicates a missed return probe
+ * (e.g. the function restarted through the Go stack-growth path, re-firing the
+ * entry probe and leaving an unmatched map entry). The instrumented functions
+ * complete in well under this bound, and without healing a single missed
+ * return silently swallows every subsequent call on that goroutine forever. */
+#define MAX_ACTIVE_SPAN_AGE_NS (10ULL * 1000000000ULL)
+
 // actor_reentered reports whether a span for this key is already active on the
 // goroutine (same-symbol re-entry). When so, it bumps the nesting depth so the
 // matching return does not emit the span early, and the caller should return.
+// Entries whose return probe was missed are dropped so the goroutine heals.
 static __always_inline bool actor_reentered(void *map, void *key) {
 	struct uprobe_data_t *d = bpf_map_lookup_elem(map, &key);
-	if (d != NULL) {
-		d->depth++;
-		return true;
+	if (d == NULL) {
+		return false;
 	}
-	return false;
+
+	if (bpf_ktime_get_ns() - d->span.start_time > MAX_ACTIVE_SPAN_AGE_NS) {
+		/* Also drop the goid propagation entry, but only when it still
+		 * points at the stale span; otherwise it belongs to a live outer
+		 * span of a different symbol and must be kept. */
+		struct span_context *goid_sc =
+			bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &key);
+		if (goid_sc != NULL) {
+			u64 stale_id, goid_id;
+			__builtin_memcpy(&stale_id, d->span.sc.SpanID, sizeof(stale_id));
+			__builtin_memcpy(&goid_id, goid_sc->SpanID, sizeof(goid_id));
+			if (stale_id == goid_id) {
+				bpf_map_delete_elem(&goakt_actor_goid_to_span_context, &key);
+			}
+		}
+		bpf_map_delete_elem(map, &key);
+		return false;
+	}
+
+	d->depth++;
+	return true;
 }
 
 // set_receive_ctx_ptr records the *ReceiveContext / *GrainContext pointer on the
@@ -705,6 +741,55 @@ SEC("uprobe/doReceive_Returns")
 int uprobe_doReceive_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	finish_span_and_output(ctx, key, &goakt_actor_do_receive);
+	return 0;
+}
+
+// --- (*ReceiveContext).build ---
+// Called for every Tell/Ask before doReceive. The user's context.Context is
+// a direct argument (not yet wrapped by WithoutCancel), and the receiver is
+// the pooled *ReceiveContext used to correlate handleReceived.
+SEC("uprobe/receiveContextBuild")
+int uprobe_receiveContextBuild(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	if (actor_reentered(&goakt_actor_receive_ctx_build, key)) {
+		return 0;
+	}
+
+	u32 map_id = 0;
+	struct uprobe_data_t *uprobe_data =
+		bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
+	if (uprobe_data == NULL) {
+		return 0;
+	}
+
+	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_DO_RECEIVE,
+			    &goakt_actor_receive_ctx_build, 2, 0, true);
+	set_receive_ctx_ptr(&goakt_actor_receive_ctx_build, key, (u64)get_argument(ctx, 1));
+	return 0;
+}
+
+SEC("uprobe/receiveContextBuild_Returns")
+int uprobe_receiveContextBuild_Returns(struct pt_regs *ctx) {
+	void *key = (void *)GOROUTINE(ctx);
+	/* build has now stored ctx on the pooled ReceiveContext. Prefer that
+	 * pointer: for Tell it is WithoutCancel(reqCtx), which stays reachable
+	 * for as long as the message sits in the mailbox. The entry-time
+	 * argument can die as soon as the HTTP handler returns. */
+	struct uprobe_data_t *d =
+		bpf_map_lookup_elem(&goakt_actor_receive_ctx_build, &key);
+	if (d != NULL && d->span.receive_ctx_ptr != 0 &&
+	    receive_context_ctx_offset != 0) {
+		struct go_iface stored = {0};
+		void *field = (void *)(d->span.receive_ctx_ptr + receive_context_ctx_offset);
+		bpf_probe_read(&stored.type, sizeof(stored.type), field);
+		bpf_probe_read(&stored.data, sizeof(stored.data),
+			       get_go_interface_instance(field));
+		if (stored.data != NULL) {
+			d->span.context_ptr = (u64)(long)stored.data;
+			start_tracking_span(stored.data, &d->span.sc);
+		}
+	}
+	finish_span_and_output(ctx, key, &goakt_actor_receive_ctx_build);
 	return 0;
 }
 

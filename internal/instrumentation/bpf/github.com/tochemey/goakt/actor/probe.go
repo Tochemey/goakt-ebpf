@@ -138,14 +138,37 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					ReturnProbe: "uprobe_doReceive_Returns",
 				},
 				{
+					// GoAkt v4.4+ builds every mailbox message through
+					// ReceiveContext.build before doReceive. The user's
+					// context.Context is a direct argument here (Tell later
+					// stores WithoutCancel(ctx) on the struct), so this
+					// is the reliable enqueue probe when doReceive is
+					// inlined or its uretprobe is missed.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*ReceiveContext).build",
+					EntryProbe:  "uprobe_receiveContextBuild",
+					ReturnProbe: "uprobe_receiveContextBuild_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					// handleRemoteTell is a one-line wrapper in current
+					// GoAkt and is typically inlined; the real body is
+					// handleRemoteTellHeld.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).handleRemoteTellHeld",
+					EntryProbe:  "uprobe_handleRemoteTell",
+					ReturnProbe: "uprobe_handleRemoteTell_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).handleRemoteTell",
 					EntryProbe:  "uprobe_handleRemoteTell",
 					ReturnProbe: "uprobe_handleRemoteTell_Returns",
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).handleRemoteAsk",
 					EntryProbe:  "uprobe_handleRemoteAsk",
 					ReturnProbe: "uprobe_handleRemoteAsk_Returns",
+					FailureMode: probe.FailureModeWarn,
 				},
 				{
 					// GoAkt v4 processes a message on a dispatcher worker via
@@ -498,15 +521,30 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
+					// relocator.Relocate was removed; relocation now
+					// enters through the RelocateBatch proto handler.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).relocateBatchHandler",
+					EntryProbe:  "uprobe_Relocate",
+					ReturnProbe: "uprobe_Relocate_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*relocator).Relocate",
 					EntryProbe:  "uprobe_Relocate",
 					ReturnProbe: "uprobe_Relocate_Returns",
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
+					// handleReceivedError is a tiny wrapper and is often
+					// inlined; the real body is WithMessage.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedErrorWithMessage",
+					EntryProbe:  "uprobe_handleReceivedError",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedError",
 					EntryProbe:  "uprobe_handleReceivedError",
-					FailureMode: probe.FailureModeWarn, // Symbol may not exist in all GoAkt versions
+					FailureMode: probe.FailureModeWarn,
 				},
 			},
 			SpecFn: loadBpf,
@@ -561,21 +599,34 @@ func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanS
 	return func(e *event) ptrace.SpanSlice {
 		switch {
 		case isEnqueueEvent(e):
+			// build and doReceive both emit this event type for the same
+			// pooled *ReceiveContext. Keep the first; a later duplicate
+			// would create a second root and steal the handling span.
+			if e.ReceiveCtxPtr != 0 {
+				if _, ok := links[e.ReceiveCtxPtr]; ok {
+					return ptrace.NewSpanSlice()
+				}
+			}
 			spans := processEvent(e, logger, targetPID)
 			if e.ReceiveCtxPtr != 0 && spans.Len() > 0 {
 				p := parentLink{spans.At(0).TraceID(), spans.At(0).SpanID()}
-				if _, ok := links[e.ReceiveCtxPtr]; !ok && len(links) >= maxEntries {
+				if len(links) >= maxEntries {
 					for k := range links {
 						delete(links, k)
 						break
 					}
 				}
 				links[e.ReceiveCtxPtr] = p
+				// ReceiveContext is pooled: at most one handling span
+				// belongs to this enqueue. Extra pending events are
+				// leftovers from a previous occupant of this pointer.
 				if buffered, ok := pending[e.ReceiveCtxPtr]; ok {
-					for i := range buffered {
-						emitHandling(&buffered[i], p).MoveAndAppendTo(spans)
+					emitHandling(&buffered[0], p).MoveAndAppendTo(spans)
+					if len(buffered) == 1 {
+						delete(pending, e.ReceiveCtxPtr)
+					} else {
+						pending[e.ReceiveCtxPtr] = buffered[1:]
 					}
-					delete(pending, e.ReceiveCtxPtr)
 				}
 			}
 			return spans
@@ -637,13 +688,18 @@ func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice
 	span.SetSpanID(pcommon.SpanID(e.SpanContext.SpanID))
 	span.SetFlags(uint32(trace.FlagsSampled))
 
-	if e.ParentSpanContext.SpanID.IsValid() {
-		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
-	} else if targetPID > 0 && e.ContextPtr != 0 {
+	// Prefer the live userspace context when we have a pointer. The BPF
+	// goid parent can be a leftover span from a previous HTTP request on
+	// a reused goroutine, which would put this span in the wrong tree.
+	if targetPID > 0 && e.ContextPtr != 0 {
 		if psc := extractParentSpanFromContext(targetPID, e.ContextPtr, logger); psc != nil {
 			span.SetParentSpanID(pcommon.SpanID(psc.SpanID()))
 			span.SetTraceID(pcommon.TraceID(psc.TraceID()))
+		} else if e.ParentSpanContext.SpanID.IsValid() {
+			span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
 		}
+	} else if e.ParentSpanContext.SpanID.IsValid() {
+		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
 	}
 
 	ts := eventTimestamps{

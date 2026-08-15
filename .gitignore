@@ -29,6 +29,7 @@ go.work.sum
 
 # Build output
 bin/
+/examples/integration/.signoz/
 
 # Earthly
 .earthly/

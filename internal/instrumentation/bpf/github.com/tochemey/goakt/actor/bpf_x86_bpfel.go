@@ -74,6 +74,7 @@ const (
 	bpfMapGoaktActorPipeToName                           = "goakt_actor_pipe_to_name"
 	bpfMapGoaktActorProcess                              = "goakt_actor_process"
 	bpfMapGoaktActorReSpawn                              = "goakt_actor_re_spawn"
+	bpfMapGoaktActorReceiveCtxBuild                      = "goakt_actor_receive_ctx_build"
 	bpfMapGoaktActorReinstateNamed                       = "goakt_actor_reinstate_named"
 	bpfMapGoaktActorRelocation                           = "goakt_actor_relocation"
 	bpfMapGoaktActorRemoteActivateGrain                  = "goakt_actor_remote_activate_grain"
@@ -208,6 +209,8 @@ const (
 	bpfProgUprobePidMetricReturns                        = "uprobe_pid_Metric_Returns"
 	bpfProgUprobePidStop                                 = "uprobe_pid_Stop"
 	bpfProgUprobePidStopReturns                          = "uprobe_pid_Stop_Returns"
+	bpfProgUprobeReceiveContextBuild                     = "uprobe_receiveContextBuild"
+	bpfProgUprobeReceiveContextBuildReturns              = "uprobe_receiveContextBuild_Returns"
 	bpfProgUprobeRemoteActivateGrainHandler              = "uprobe_remoteActivateGrainHandler"
 	bpfProgUprobeRemoteActivateGrainHandlerReturns       = "uprobe_remoteActivateGrainHandler_Returns"
 	bpfProgUprobeRemoteAskGrain                          = "uprobe_remoteAskGrain"
@@ -387,6 +390,8 @@ type bpfProgramSpecs struct {
 	UprobePidMetricReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_pid_Metric_Returns"`
 	UprobePidStop                                 *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop"`
 	UprobePidStopReturns                          *ebpf.ProgramSpec `ebpf:"uprobe_pid_Stop_Returns"`
+	UprobeReceiveContextBuild                     *ebpf.ProgramSpec `ebpf:"uprobe_receiveContextBuild"`
+	UprobeReceiveContextBuildReturns              *ebpf.ProgramSpec `ebpf:"uprobe_receiveContextBuild_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler"`
 	UprobeRemoteActivateGrainHandlerReturns       *ebpf.ProgramSpec `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
 	UprobeRemoteAskGrain                          *ebpf.ProgramSpec `ebpf:"uprobe_remoteAskGrain"`
@@ -461,6 +466,7 @@ type bpfMapSpecs struct {
 	GoaktActorPipeToName                *ebpf.MapSpec `ebpf:"goakt_actor_pipe_to_name"`
 	GoaktActorProcess                   *ebpf.MapSpec `ebpf:"goakt_actor_process"`
 	GoaktActorReSpawn                   *ebpf.MapSpec `ebpf:"goakt_actor_re_spawn"`
+	GoaktActorReceiveCtxBuild           *ebpf.MapSpec `ebpf:"goakt_actor_receive_ctx_build"`
 	GoaktActorReinstateNamed            *ebpf.MapSpec `ebpf:"goakt_actor_reinstate_named"`
 	GoaktActorRelocation                *ebpf.MapSpec `ebpf:"goakt_actor_relocation"`
 	GoaktActorRemoteActivateGrain       *ebpf.MapSpec `ebpf:"goakt_actor_remote_activate_grain"`
@@ -568,6 +574,7 @@ type bpfMaps struct {
 	GoaktActorPipeToName                *ebpf.Map `ebpf:"goakt_actor_pipe_to_name"`
 	GoaktActorProcess                   *ebpf.Map `ebpf:"goakt_actor_process"`
 	GoaktActorReSpawn                   *ebpf.Map `ebpf:"goakt_actor_re_spawn"`
+	GoaktActorReceiveCtxBuild           *ebpf.Map `ebpf:"goakt_actor_receive_ctx_build"`
 	GoaktActorReinstateNamed            *ebpf.Map `ebpf:"goakt_actor_reinstate_named"`
 	GoaktActorRelocation                *ebpf.Map `ebpf:"goakt_actor_relocation"`
 	GoaktActorRemoteActivateGrain       *ebpf.Map `ebpf:"goakt_actor_remote_activate_grain"`
@@ -645,6 +652,7 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorPipeToName,
 		m.GoaktActorProcess,
 		m.GoaktActorReSpawn,
+		m.GoaktActorReceiveCtxBuild,
 		m.GoaktActorReinstateNamed,
 		m.GoaktActorRelocation,
 		m.GoaktActorRemoteActivateGrain,
@@ -798,6 +806,8 @@ type bpfPrograms struct {
 	UprobePidMetricReturns                        *ebpf.Program `ebpf:"uprobe_pid_Metric_Returns"`
 	UprobePidStop                                 *ebpf.Program `ebpf:"uprobe_pid_Stop"`
 	UprobePidStopReturns                          *ebpf.Program `ebpf:"uprobe_pid_Stop_Returns"`
+	UprobeReceiveContextBuild                     *ebpf.Program `ebpf:"uprobe_receiveContextBuild"`
+	UprobeReceiveContextBuildReturns              *ebpf.Program `ebpf:"uprobe_receiveContextBuild_Returns"`
 	UprobeRemoteActivateGrainHandler              *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler"`
 	UprobeRemoteActivateGrainHandlerReturns       *ebpf.Program `ebpf:"uprobe_remoteActivateGrainHandler_Returns"`
 	UprobeRemoteAskGrain                          *ebpf.Program `ebpf:"uprobe_remoteAskGrain"`
@@ -931,6 +941,8 @@ func (p *bpfPrograms) Close() error {
 		p.UprobePidMetricReturns,
 		p.UprobePidStop,
 		p.UprobePidStopReturns,
+		p.UprobeReceiveContextBuild,
+		p.UprobeReceiveContextBuildReturns,
 		p.UprobeRemoteActivateGrainHandler,
 		p.UprobeRemoteActivateGrainHandlerReturns,
 		p.UprobeRemoteAskGrain,
