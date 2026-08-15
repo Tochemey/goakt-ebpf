@@ -1,0 +1,25 @@
+# CI-only stack: OTel Collector + Jaeger, used by scripts/ci-integration.sh.
+# The app and agent run on the host, so only the trace backend runs in Docker.
+# The main docker-compose.yml is the local SigNoz stack and requires
+# `make signoz-source` to generate its included Compose file.
+
+services:
+  # OpenTelemetry Collector - receives traces from the agent, forwards to Jaeger
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      - jaeger
+
+  # Jaeger - trace storage and query API (http://localhost:16686)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI / query API

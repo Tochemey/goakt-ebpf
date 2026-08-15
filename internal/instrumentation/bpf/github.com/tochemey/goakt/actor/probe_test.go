@@ -240,7 +240,7 @@ func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
 
 		require.Equal(t, 0, processFn(handlingEvent()).Len())
 		second := handlingEvent()
-		second.BaseSpanProperties.SpanContext.SpanID = trace.SpanID{0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77}
+		second.SpanContext.SpanID = trace.SpanID{0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77}
 		require.Equal(t, 0, processFn(second).Len())
 
 		spans := processFn(enqueueEvent())
