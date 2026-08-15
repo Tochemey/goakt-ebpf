@@ -30,6 +30,7 @@ jobs:
               - 'go.sum'
               - '**/Dockerfile*'
               - 'examples/**'
+              - '!**/*.md'
               - '.golangci.yml'
               - '.github/workflows/ci.yml'
               - '**/docker-compose*.yml'
