@@ -57,6 +57,7 @@ const (
 	bpfMapGoaktActorActorOf                              = "goakt_actor_actor_of"
 	bpfMapGoaktActorActors                               = "goakt_actor_actors"
 	bpfMapGoaktActorAsk                                  = "goakt_actor_ask"
+	bpfMapGoaktActorAskGrain                             = "goakt_actor_ask_grain"
 	bpfMapGoaktActorBatchAsk                             = "goakt_actor_batch_ask"
 	bpfMapGoaktActorBatchTell                            = "goakt_actor_batch_tell"
 	bpfMapGoaktActorDiscoverActor                        = "goakt_actor_discover_actor"
@@ -119,6 +120,7 @@ const (
 	bpfMapGoaktActorSystemMetric                         = "goakt_actor_system_metric"
 	bpfMapGoaktActorSystemSpawn                          = "goakt_actor_system_spawn"
 	bpfMapGoaktActorTell                                 = "goakt_actor_tell"
+	bpfMapGoaktActorTellGrain                            = "goakt_actor_tell_grain"
 	bpfMapGoaktActorUprobeStorageMap                     = "goakt_actor_uprobe_storage_map"
 	bpfMapProbeActiveSamplerMap                          = "probe_active_sampler_map"
 	bpfMapSamplersConfigMap                              = "samplers_config_map"
@@ -131,6 +133,8 @@ const (
 	bpfProgUprobeActors                                  = "uprobe_Actors"
 	bpfProgUprobeActorsReturns                           = "uprobe_Actors_Returns"
 	bpfProgUprobeAsk                                     = "uprobe_Ask"
+	bpfProgUprobeAskGrain                                = "uprobe_AskGrain"
+	bpfProgUprobeAskGrainReturns                         = "uprobe_AskGrain_Returns"
 	bpfProgUprobeAskReturns                              = "uprobe_Ask_Returns"
 	bpfProgUprobeBatchAsk                                = "uprobe_BatchAsk"
 	bpfProgUprobeBatchAskReturns                         = "uprobe_BatchAsk_Returns"
@@ -187,6 +191,8 @@ const (
 	bpfProgUprobeStart                                   = "uprobe_Start"
 	bpfProgUprobeStartReturns                            = "uprobe_Start_Returns"
 	bpfProgUprobeTell                                    = "uprobe_Tell"
+	bpfProgUprobeTellGrain                               = "uprobe_TellGrain"
+	bpfProgUprobeTellGrainReturns                        = "uprobe_TellGrain_Returns"
 	bpfProgUprobeTellReturns                             = "uprobe_Tell_Returns"
 	bpfProgUprobeActorSystemMetric                       = "uprobe_actorSystem_Metric"
 	bpfProgUprobeActorSystemMetricReturns                = "uprobe_actorSystem_Metric_Returns"
@@ -312,6 +318,8 @@ type bpfProgramSpecs struct {
 	UprobeActors                                  *ebpf.ProgramSpec `ebpf:"uprobe_Actors"`
 	UprobeActorsReturns                           *ebpf.ProgramSpec `ebpf:"uprobe_Actors_Returns"`
 	UprobeAsk                                     *ebpf.ProgramSpec `ebpf:"uprobe_Ask"`
+	UprobeAskGrain                                *ebpf.ProgramSpec `ebpf:"uprobe_AskGrain"`
+	UprobeAskGrainReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_AskGrain_Returns"`
 	UprobeAskReturns                              *ebpf.ProgramSpec `ebpf:"uprobe_Ask_Returns"`
 	UprobeBatchAsk                                *ebpf.ProgramSpec `ebpf:"uprobe_BatchAsk"`
 	UprobeBatchAskReturns                         *ebpf.ProgramSpec `ebpf:"uprobe_BatchAsk_Returns"`
@@ -368,6 +376,8 @@ type bpfProgramSpecs struct {
 	UprobeStart                                   *ebpf.ProgramSpec `ebpf:"uprobe_Start"`
 	UprobeStartReturns                            *ebpf.ProgramSpec `ebpf:"uprobe_Start_Returns"`
 	UprobeTell                                    *ebpf.ProgramSpec `ebpf:"uprobe_Tell"`
+	UprobeTellGrain                               *ebpf.ProgramSpec `ebpf:"uprobe_TellGrain"`
+	UprobeTellGrainReturns                        *ebpf.ProgramSpec `ebpf:"uprobe_TellGrain_Returns"`
 	UprobeTellReturns                             *ebpf.ProgramSpec `ebpf:"uprobe_Tell_Returns"`
 	UprobeActorSystemMetric                       *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Metric"`
 	UprobeActorSystemMetricReturns                *ebpf.ProgramSpec `ebpf:"uprobe_actorSystem_Metric_Returns"`
@@ -449,6 +459,7 @@ type bpfMapSpecs struct {
 	GoaktActorActorOf                   *ebpf.MapSpec `ebpf:"goakt_actor_actor_of"`
 	GoaktActorActors                    *ebpf.MapSpec `ebpf:"goakt_actor_actors"`
 	GoaktActorAsk                       *ebpf.MapSpec `ebpf:"goakt_actor_ask"`
+	GoaktActorAskGrain                  *ebpf.MapSpec `ebpf:"goakt_actor_ask_grain"`
 	GoaktActorBatchAsk                  *ebpf.MapSpec `ebpf:"goakt_actor_batch_ask"`
 	GoaktActorBatchTell                 *ebpf.MapSpec `ebpf:"goakt_actor_batch_tell"`
 	GoaktActorDiscoverActor             *ebpf.MapSpec `ebpf:"goakt_actor_discover_actor"`
@@ -511,6 +522,7 @@ type bpfMapSpecs struct {
 	GoaktActorSystemMetric              *ebpf.MapSpec `ebpf:"goakt_actor_system_metric"`
 	GoaktActorSystemSpawn               *ebpf.MapSpec `ebpf:"goakt_actor_system_spawn"`
 	GoaktActorTell                      *ebpf.MapSpec `ebpf:"goakt_actor_tell"`
+	GoaktActorTellGrain                 *ebpf.MapSpec `ebpf:"goakt_actor_tell_grain"`
 	GoaktActorUprobeStorageMap          *ebpf.MapSpec `ebpf:"goakt_actor_uprobe_storage_map"`
 	ProbeActiveSamplerMap               *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
 	SamplersConfigMap                   *ebpf.MapSpec `ebpf:"samplers_config_map"`
@@ -557,6 +569,7 @@ type bpfMaps struct {
 	GoaktActorActorOf                   *ebpf.Map `ebpf:"goakt_actor_actor_of"`
 	GoaktActorActors                    *ebpf.Map `ebpf:"goakt_actor_actors"`
 	GoaktActorAsk                       *ebpf.Map `ebpf:"goakt_actor_ask"`
+	GoaktActorAskGrain                  *ebpf.Map `ebpf:"goakt_actor_ask_grain"`
 	GoaktActorBatchAsk                  *ebpf.Map `ebpf:"goakt_actor_batch_ask"`
 	GoaktActorBatchTell                 *ebpf.Map `ebpf:"goakt_actor_batch_tell"`
 	GoaktActorDiscoverActor             *ebpf.Map `ebpf:"goakt_actor_discover_actor"`
@@ -619,6 +632,7 @@ type bpfMaps struct {
 	GoaktActorSystemMetric              *ebpf.Map `ebpf:"goakt_actor_system_metric"`
 	GoaktActorSystemSpawn               *ebpf.Map `ebpf:"goakt_actor_system_spawn"`
 	GoaktActorTell                      *ebpf.Map `ebpf:"goakt_actor_tell"`
+	GoaktActorTellGrain                 *ebpf.Map `ebpf:"goakt_actor_tell_grain"`
 	GoaktActorUprobeStorageMap          *ebpf.Map `ebpf:"goakt_actor_uprobe_storage_map"`
 	ProbeActiveSamplerMap               *ebpf.Map `ebpf:"probe_active_sampler_map"`
 	SamplersConfigMap                   *ebpf.Map `ebpf:"samplers_config_map"`
@@ -635,6 +649,7 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorActorOf,
 		m.GoaktActorActors,
 		m.GoaktActorAsk,
+		m.GoaktActorAskGrain,
 		m.GoaktActorBatchAsk,
 		m.GoaktActorBatchTell,
 		m.GoaktActorDiscoverActor,
@@ -697,6 +712,7 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorSystemMetric,
 		m.GoaktActorSystemSpawn,
 		m.GoaktActorTell,
+		m.GoaktActorTellGrain,
 		m.GoaktActorUprobeStorageMap,
 		m.ProbeActiveSamplerMap,
 		m.SamplersConfigMap,
@@ -728,6 +744,8 @@ type bpfPrograms struct {
 	UprobeActors                                  *ebpf.Program `ebpf:"uprobe_Actors"`
 	UprobeActorsReturns                           *ebpf.Program `ebpf:"uprobe_Actors_Returns"`
 	UprobeAsk                                     *ebpf.Program `ebpf:"uprobe_Ask"`
+	UprobeAskGrain                                *ebpf.Program `ebpf:"uprobe_AskGrain"`
+	UprobeAskGrainReturns                         *ebpf.Program `ebpf:"uprobe_AskGrain_Returns"`
 	UprobeAskReturns                              *ebpf.Program `ebpf:"uprobe_Ask_Returns"`
 	UprobeBatchAsk                                *ebpf.Program `ebpf:"uprobe_BatchAsk"`
 	UprobeBatchAskReturns                         *ebpf.Program `ebpf:"uprobe_BatchAsk_Returns"`
@@ -784,6 +802,8 @@ type bpfPrograms struct {
 	UprobeStart                                   *ebpf.Program `ebpf:"uprobe_Start"`
 	UprobeStartReturns                            *ebpf.Program `ebpf:"uprobe_Start_Returns"`
 	UprobeTell                                    *ebpf.Program `ebpf:"uprobe_Tell"`
+	UprobeTellGrain                               *ebpf.Program `ebpf:"uprobe_TellGrain"`
+	UprobeTellGrainReturns                        *ebpf.Program `ebpf:"uprobe_TellGrain_Returns"`
 	UprobeTellReturns                             *ebpf.Program `ebpf:"uprobe_Tell_Returns"`
 	UprobeActorSystemMetric                       *ebpf.Program `ebpf:"uprobe_actorSystem_Metric"`
 	UprobeActorSystemMetricReturns                *ebpf.Program `ebpf:"uprobe_actorSystem_Metric_Returns"`
@@ -863,6 +883,8 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeActors,
 		p.UprobeActorsReturns,
 		p.UprobeAsk,
+		p.UprobeAskGrain,
+		p.UprobeAskGrainReturns,
 		p.UprobeAskReturns,
 		p.UprobeBatchAsk,
 		p.UprobeBatchAskReturns,
@@ -919,6 +941,8 @@ func (p *bpfPrograms) Close() error {
 		p.UprobeStart,
 		p.UprobeStartReturns,
 		p.UprobeTell,
+		p.UprobeTellGrain,
+		p.UprobeTellGrainReturns,
 		p.UprobeTellReturns,
 		p.UprobeActorSystemMetric,
 		p.UprobeActorSystemMetricReturns,

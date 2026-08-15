@@ -9,7 +9,11 @@ ROOT=$(pwd)
 
 APP_PID=""
 AGENT_PID=""
+GRAINS_APP_PID=""
+GRAINS_AGENT_PID=""
 cleanup() {
+  [[ -n "$GRAINS_AGENT_PID" ]] && sudo kill $GRAINS_AGENT_PID 2>/dev/null || true
+  [[ -n "$GRAINS_APP_PID" ]] && kill $GRAINS_APP_PID 2>/dev/null || true
   [[ -n "$AGENT_PID" ]] && sudo kill $AGENT_PID 2>/dev/null || true
   [[ -n "$APP_PID" ]] && kill $APP_PID 2>/dev/null || true
   docker compose -f examples/integration/docker-compose.ci.yml down -v 2>/dev/null || true
@@ -23,6 +27,11 @@ sleep 5
 echo "=== Building integration app ==="
 cd examples/integration/app
 go build -mod=mod -o /tmp/integration-app .
+cd "$ROOT"
+
+echo "=== Building grains app ==="
+cd examples/grains/app
+go build -mod=mod -o /tmp/grains-app .
 cd "$ROOT"
 
 echo "=== Installing BPF tools and generating ==="
@@ -46,6 +55,17 @@ HTTP_PORT=$HTTP_PORT \
 APP_PID=$!
 sleep 3
 
+echo "=== Starting grains app in background ==="
+GRAINS_HTTP_PORT=8081
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+OTEL_SERVICE_NAME=grains-app \
+OTEL_TRACES_STDOUT=1 \
+HTTP_PORT=$GRAINS_HTTP_PORT \
+/tmp/grains-app &
+GRAINS_APP_PID=$!
+sleep 3
+
 echo "=== Starting agent (attach to PID $APP_PID) ==="
 # Use `sudo env` to explicitly pass OTEL vars - sudo env_reset strips them even with -E.
 sudo env \
@@ -58,13 +78,26 @@ sudo env \
   /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
 
-echo "=== Waiting for agent to attach (5s) ==="
+echo "=== Starting agent (attach to grains app PID $GRAINS_APP_PID) ==="
+sudo env \
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+  OTEL_SERVICE_NAME=goakt-ebpf \
+  OTEL_TRACES_STDOUT=1 \
+  GOAKT_EBPF_DEBUG_CONTEXT_READER=1 \
+  GOAKT_EBPF_LOG_LEVEL=debug \
+  /tmp/goakt-ebpf -pid $GRAINS_APP_PID &
+GRAINS_AGENT_PID=$!
+
+echo "=== Waiting for agents to attach (5s) ==="
 sleep 5
 
 echo "=== Triggering HTTP requests (otelhttp + Layout C validation) ==="
 for i in 1 2 3 4 5; do
   curl -sf "http://localhost:$HTTP_PORT/echo" >/dev/null || true
   curl -sf "http://localhost:$HTTP_PORT/ask" >/dev/null || true
+  curl -sf "http://localhost:$GRAINS_HTTP_PORT/increment?id=ci" >/dev/null || true
+  curl -sf "http://localhost:$GRAINS_HTTP_PORT/count?id=ci" >/dev/null || true
   sleep 1
 done
 

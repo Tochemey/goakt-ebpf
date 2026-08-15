@@ -10,13 +10,18 @@ SIGNOZ_VERSION_MARKER := $(SIGNOZ_SOURCE_DIR)/.goakt-version
 APP_URL := http://localhost:8081
 SIGNOZ_URL := http://localhost:8080
 
+# Grains example (fully in Docker: backend + app + agent)
+GRAINS_COMPOSE := examples/grains/docker-compose.yml
+GRAINS_APP_URL := http://localhost:8082
+JAEGER_URL := http://localhost:16686
+
 # Cross-platform BPF/test (macOS, Windows, Linux)
 DOCKER_BASE_IMAGE := goakt-ebpf-base
 DOCKER_MOUNT := -v "$(CURDIR):/app" -w /app
 DOCKER_BPF_ENV := -e BPF2GO_CFLAGS="-I/app/internal/include/libbpf -I/app/internal/include" -e GOFLAGS="-mod=mod"
 BPF_GENERATE := go generate ./internal/instrumentation/bpf/github.com/tochemey/goakt/actor/...
 
-.PHONY: help build start view trace-http signoz-source up stop down logs verify-lima diagnose docker-test docker-generate docker-precommit
+.PHONY: help build start view trace-http signoz-source up stop down logs verify-lima diagnose docker-test docker-generate docker-precommit grains-build grains-start grains-trace grains-logs grains-view grains-stop
 
 .DEFAULT_GOAL := help
 
@@ -32,6 +37,13 @@ help:
 	@echo "  make down            - Remove all containers, volumes, and networks"
 	@echo "  make verify-lima     - Verify Docker is using Lima (Mac only)"
 	@echo "  make diagnose        - Show agent logs and Docker host (troubleshooting)"
+	@echo ""
+	@echo "Grains example targets (Docker; macOS needs Lima):"
+	@echo "  make grains-start    - Start Jaeger backend, grains app, and eBPF agent"
+	@echo "  make grains-trace    - Call /increment and /count to generate traces"
+	@echo "  make grains-logs     - Follow app and agent logs (includes stdout spans)"
+	@echo "  make grains-view     - Open the Jaeger UI"
+	@echo "  make grains-stop     - Stop app, agent, and backend"
 	@echo ""
 	@echo "Cross-platform (eBPF requires Linux):"
 	@echo "  make docker-test      - Run BPF generate + tests in Docker"
@@ -112,6 +124,47 @@ view:
 ## Follow container logs
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
+
+## --- Grains example (examples/grains) ---
+# Backend, app, and agent all run in Docker. eBPF needs a Linux kernel:
+# native on Linux, via Lima on macOS (make verify-lima; not Docker Desktop).
+
+## Build the grains example images (sequentially: the parallel bake build
+## can drop the daemon connection on resource-constrained Docker VMs)
+grains-build:
+	docker compose -f $(GRAINS_COMPOSE) build grains-app
+	docker compose -f $(GRAINS_COMPOSE) build goakt-ebpf
+
+## Start the grains example (Jaeger backend, app, agent) and generate traces
+grains-start: grains-build
+	docker compose -f $(GRAINS_COMPOSE) up -d
+	$(MAKE) grains-trace
+	@echo ""
+	@echo "Grains example is running. View traces: make grains-view"
+
+## Call /increment and /count to generate fresh grain traces
+grains-trace:
+	@echo "Waiting for the grains app to become ready..."
+	@echo "GET /increment:"
+	@curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-connrefused "$(GRAINS_APP_URL)/increment?id=demo"
+	@echo "GET /count:"
+	@curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-connrefused "$(GRAINS_APP_URL)/count?id=demo"
+
+## Follow grains app and agent logs (app logs include stdout spans)
+grains-logs:
+	docker compose -f $(GRAINS_COMPOSE) logs -f grains-app goakt-ebpf
+
+## Open Jaeger UI in browser to view grain traces
+grains-view:
+	@echo "Opening Jaeger at $(JAEGER_URL)..."
+	@if command -v open >/dev/null 2>&1 && open "$(JAEGER_URL)" >/dev/null 2>&1; then :; \
+	elif command -v xdg-open >/dev/null 2>&1 && xdg-open "$(JAEGER_URL)" >/dev/null 2>&1; then :; \
+	else echo "Could not open a browser automatically. Open $(JAEGER_URL) manually."; fi
+
+## Remove the grains example containers, volumes, and networks
+grains-stop:
+	docker compose -f $(GRAINS_COMPOSE) down -v
+	@echo "Grains example stopped."
 
 ## Verify Docker is using Lima (Mac). Run before make start if traces don't appear.
 verify-lima:

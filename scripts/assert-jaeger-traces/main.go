@@ -53,6 +53,13 @@ var manualSpanNames = map[string]bool{
 	"send-tell": true, "send-ask": true,
 }
 
+// grainAppSpanNames are the grains-app spans expected to parent the eBPF
+// grain spans (grain.tell, grain.ask, grain.doReceive).
+var grainAppSpanNames = map[string]bool{
+	"send-tell-grain": true, "send-ask-grain": true,
+	"GET /increment": true, "GET /count": true,
+}
+
 // nolint:funlen
 // nolint:gocognit
 // nolint:gocyclo
@@ -70,6 +77,10 @@ func main() {
 		"actor.doReceive", "actor.process",
 		"send-tell", "send-ask",
 		"GET /echo", "GET /ask",
+		"grain.tell", "grain.ask",
+		"grain.doReceive", "grain.process",
+		"send-tell-grain", "send-ask-grain",
+		"GET /increment", "GET /count",
 	}
 
 	foundNames := make(map[string]bool)
@@ -86,6 +97,13 @@ func main() {
 		completeChains       int // app → doReceive → process (3-level chain)
 		httpCompleteChains   int // GET → doReceive → process
 		manualCompleteChains int // send-* → doReceive → process
+		grainCallerTotal     int // grain.tell / grain.ask spans
+		grainCallerWithApp   int // grain.tell / grain.ask with app span as parent
+		grainReceiveTotal    int
+		grainReceiveWithApp  int // grain.doReceive with app span as parent
+		grainProcessTotal    int
+		grainProcessWithDR   int // grain.process with grain.doReceive as parent
+		grainCompleteChains  int // app → grain.doReceive → grain.process
 	}
 
 	for _, t := range traces {
@@ -134,6 +152,31 @@ func main() {
 				}
 				if manualSpanNames[parent.OperationName] {
 					stats.receiveWithManual++
+				}
+
+			case "grain.process":
+				stats.grainProcessTotal++
+				parent := parentSpan(s, spanByID)
+				if parent == nil || parent.OperationName != "grain.doReceive" {
+					continue
+				}
+				stats.grainProcessWithDR++
+
+				grandparent := parentSpan(*parent, spanByID)
+				if grandparent != nil && grainAppSpanNames[grandparent.OperationName] {
+					stats.grainCompleteChains++
+				}
+
+			case "grain.doReceive":
+				stats.grainReceiveTotal++
+				if parent := parentSpan(s, spanByID); parent != nil && grainAppSpanNames[parent.OperationName] {
+					stats.grainReceiveWithApp++
+				}
+
+			case "grain.tell", "grain.ask":
+				stats.grainCallerTotal++
+				if parent := parentSpan(s, spanByID); parent != nil && grainAppSpanNames[parent.OperationName] {
+					stats.grainCallerWithApp++
 				}
 			}
 		}
@@ -205,6 +248,31 @@ func main() {
 		fail("no manual-triggered complete chains (send-* → doReceive → process)")
 	}
 
+	// 10. Grain caller-side spans (grain.tell/grain.ask) must be linked under
+	// app spans (verifies the actorSystem.TellGrain/AskGrain probes).
+	if stats.grainCallerTotal == 0 {
+		fail("no grain.tell/grain.ask spans found (grain send probes not firing)")
+	} else if stats.grainCallerWithApp == 0 {
+		fail("no grain.tell/grain.ask spans have an app span as parent (grain caller context extraction broken)")
+	}
+
+	// 11. grain.doReceive must be linked under app spans.
+	if stats.grainReceiveTotal == 0 {
+		fail("no grain.doReceive spans found")
+	} else if stats.grainReceiveWithApp == 0 {
+		fail("no grain.doReceive spans have an app span as parent (grain context extraction broken)")
+	}
+
+	// 12. grain.process must chain under grain.doReceive, with complete chains present.
+	if stats.grainProcessTotal == 0 {
+		fail("no grain.process spans found")
+	} else if stats.grainProcessWithDR == 0 {
+		fail("no grain.process spans have grain.doReceive as parent (grain enqueue/handling correlation broken)")
+	}
+	if stats.grainCompleteChains == 0 {
+		fail("no complete grain chains (app → grain.doReceive → grain.process) found")
+	}
+
 	if !passed {
 		fmt.Fprintln(os.Stderr, "\n--- Trace dump for debugging ---")
 		dumpTraces(traces)
@@ -219,6 +287,14 @@ func main() {
 		stats.receiveWithApp, stats.receiveTotal, stats.receiveWithHTTP, stats.receiveWithManual)
 	fmt.Printf("  complete chains (app→doReceive→process): %d (%d HTTP, %d manual)\n",
 		stats.completeChains, stats.httpCompleteChains, stats.manualCompleteChains)
+	fmt.Printf("  grain.tell/grain.ask: %d/%d with app parent\n",
+		stats.grainCallerWithApp, stats.grainCallerTotal)
+	fmt.Printf("  grain.doReceive: %d/%d with app parent\n",
+		stats.grainReceiveWithApp, stats.grainReceiveTotal)
+	fmt.Printf("  grain.process: %d/%d with doReceive parent\n",
+		stats.grainProcessWithDR, stats.grainProcessTotal)
+	fmt.Printf("  complete grain chains (app→grain.doReceive→grain.process): %d\n",
+		stats.grainCompleteChains)
 }
 
 // parentSpan resolves the CHILD_OF parent within the same trace's span map.
@@ -298,23 +374,25 @@ func dumpTraces(traces []trace) {
 	}
 }
 
-// fetchTraces retrieves traces from both services and merges them by trace ID
-// so that cross-service parent references resolve correctly.
+// fetchTraces retrieves traces from the agent and app services and merges
+// them by trace ID so that cross-service parent references resolve correctly.
 func fetchTraces(baseURL, service string) []trace {
 	agentTraces := fetchServiceTraces(baseURL, service)
-	appTraces := fetchServiceTraces(baseURL, "integration-app")
 
 	merged := make(map[string]*trace)
 	for i := range agentTraces {
 		t := &agentTraces[i]
 		merged[t.TraceID] = t
 	}
-	for _, t := range appTraces {
-		if existing, ok := merged[t.TraceID]; ok {
-			existing.Spans = append(existing.Spans, t.Spans...)
-		} else {
-			dup := t
-			merged[t.TraceID] = &dup
+
+	for _, appService := range []string{"integration-app", "grains-app"} {
+		for _, t := range fetchServiceTraces(baseURL, appService) {
+			if existing, ok := merged[t.TraceID]; ok {
+				existing.Spans = append(existing.Spans, t.Spans...)
+			} else {
+				dup := t
+				merged[t.TraceID] = &dup
+			}
 		}
 	}
 

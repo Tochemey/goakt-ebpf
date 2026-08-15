@@ -1,0 +1,40 @@
+# Grains example stack, fully in Docker: OTel Collector + Jaeger (included
+# from the CI compose) plus the grains app and the goakt-ebpf agent.
+# eBPF needs a Linux kernel: works natively on Linux, and on macOS via Lima
+# (not Docker Desktop) — see ../integration/README.md for Lima setup.
+include:
+  - path: ../integration/docker-compose.ci.yml
+
+services:
+  grains-app:
+    container_name: grains-app
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: grains-app
+      HTTP_PORT: 8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      - otel-collector
+
+  # goakt-ebpf agent - attaches to grains-app, exports traces to the collector
+  goakt-ebpf:
+    init: true
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    privileged: true # Required for eBPF uprobe attachment to target process
+    user: root
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: goakt-ebpf
+    depends_on:
+      - grains-app
+    pid: "container:grains-app"
+    entrypoint:
+      ["/bin/sh", "-c", "sleep 3 && exec /usr/local/bin/goakt-ebpf -pid 1"]

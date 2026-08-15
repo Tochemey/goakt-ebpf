@@ -80,6 +80,8 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define EVENT_TYPE_PID_REMOTE_STOP 62
 #define EVENT_TYPE_PID_REMOTE_RE_SPAWN 63
 #define EVENT_TYPE_SHUTDOWN 64
+#define EVENT_TYPE_TELL_GRAIN 65
+#define EVENT_TYPE_ASK_GRAIN 66
 
 struct goakt_actor_span_t {
 	u8 event_type;
@@ -534,6 +536,18 @@ struct {
 	__type(value, struct uprobe_data_t);
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_shutdown SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_tell_grain SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, void *);
+	__type(value, struct uprobe_data_t);
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_ask_grain SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -1622,6 +1636,8 @@ PROBE_ENTRY_RETURN(Start, goakt_actor_start, EVENT_TYPE_START)
 PROBE_ENTRY_RETURN(ScheduleOnce, goakt_actor_schedule_once, EVENT_TYPE_SCHEDULE_ONCE)
 PROBE_ENTRY_RETURN(Schedule, goakt_actor_schedule, EVENT_TYPE_SCHEDULE)
 PROBE_ENTRY_RETURN(ScheduleWithCron, goakt_actor_schedule_with_cron, EVENT_TYPE_SCHEDULE_WITH_CRON)
+PROBE_ENTRY_RETURN(TellGrain, goakt_actor_tell_grain, EVENT_TYPE_TELL_GRAIN)
+PROBE_ENTRY_RETURN(AskGrain, goakt_actor_ask_grain, EVENT_TYPE_ASK_GRAIN)
 
 /* actorSystem.Stop and actorSystem.Metric - unique SEC names to avoid PID conflict */
 SEC("uprobe/actorSystem_Stop")

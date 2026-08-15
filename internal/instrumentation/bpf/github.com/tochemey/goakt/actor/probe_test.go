@@ -235,6 +235,43 @@ func TestMakeProcessFnPropagatesTraceID(t *testing.T) {
 		require.Equal(t, doReceiveBPFSpanID, trace.SpanID(spans.At(0).ParentSpanID()))
 	})
 
+	t.Run("grain send events convert to caller-side spans", func(t *testing.T) {
+		cases := []struct {
+			eventType uint8
+			name      string
+			kind      ptrace.SpanKind
+			operation string
+		}{
+			{eventTypeTellGrain, "grain.tell", ptrace.SpanKindProducer, "send"},
+			{eventTypeAskGrain, "grain.ask", ptrace.SpanKindClient, "request"},
+		}
+
+		for _, tc := range cases {
+			e := &event{
+				EventType: tc.eventType,
+				BaseSpanProperties: instcontext.BaseSpanProperties{
+					StartTime: 5, EndTime: 25,
+					SpanContext: instcontext.EBPFSpanContext{TraceID: bpfTraceID, SpanID: doReceiveBPFSpanID},
+				},
+				ContextPtr: 0x1234,
+			}
+
+			spans := makeProcessFn(slog.Default(), 42)(e)
+			require.Equal(t, 1, spans.Len())
+			span := spans.At(0)
+			require.Equal(t, tc.name, span.Name())
+			require.Equal(t, tc.kind, span.Kind())
+			require.Equal(t, appTraceID, trace.TraceID(span.TraceID()))
+
+			op, ok := span.Attributes().Get("messaging.operation")
+			require.True(t, ok)
+			require.Equal(t, tc.operation, op.Str())
+			dest, ok := span.Attributes().Get("messaging.destination")
+			require.True(t, ok)
+			require.Equal(t, "grain", dest.Str())
+		}
+	})
+
 	t.Run("pooled pointer attaches only one pending handling span", func(t *testing.T) {
 		processFn := makeProcessFn(slog.Default(), 42)
 

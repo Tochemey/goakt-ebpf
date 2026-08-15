@@ -77,6 +77,15 @@ GoAkt v4 message handling is asynchronous: the message is enqueued into the acto
 | `(*PID).BatchTell` | actor.batchTell | sent_timestamp |
 | `(*PID).BatchAsk`  | actor.batchAsk  | sent_timestamp |
 
+### Local grain messaging (System)
+
+`(*actorSystem).TellGrain` and `(*actorSystem).AskGrain` are the local grain send entry points. `GrainContext.TellGrain`/`AskGrain` delegate to them, so grain-to-grain sends are covered by the same probes.
+
+| Symbol                     | Span       | Attributes     |
+|----------------------------|------------|----------------|
+| `(*actorSystem).TellGrain` | grain.tell | sent_timestamp |
+| `(*actorSystem).AskGrain`  | grain.ask  | sent_timestamp |
+
 ### Remote messaging (System)
 
 | Symbol                                      | Span                          | Attributes                            |
@@ -316,6 +325,8 @@ The perf ring does not guarantee cross-CPU ordering, so a handling event may arr
 | `(*actorSystem).remote*Handler`   | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).remoteTellGrain`  | Direct arg     | true            | 2             | 0                               |
 | `(*actorSystem).remoteAskGrain`   | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).TellGrain`        | Direct arg     | true            | 2             | 0                               |
+| `(*actorSystem).AskGrain`         | Direct arg     | true            | 2             | 0                               |
 | `(*relocator).Relocate`           | Direct arg     | true            | 2             | 0                               |
 | `(*PID).handleReceived`           | No context     | —               | 0             | —                               |
 | `(*grainPID).handleGrainContext`  | No context     | —               | 0             | —                               |

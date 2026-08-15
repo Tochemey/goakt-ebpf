@@ -95,6 +95,8 @@ const (
 	eventTypePIDRemoteStop             = 62
 	eventTypePIDRemoteReSpawn          = 63
 	eventTypeShutdown                  = 64
+	eventTypeTellGrain                 = 65
+	eventTypeAskGrain                  = 66
 )
 
 // New returns a new [probe.Probe] for GoAkt actor instrumentation (all targets).
@@ -294,6 +296,22 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).ScheduleWithCron",
 					EntryProbe:  "uprobe_ScheduleWithCron",
 					ReturnProbe: "uprobe_ScheduleWithCron_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					// Local grain send entry point; GrainContext.TellGrain
+					// delegates here, so grain-to-grain sends are covered too.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).TellGrain",
+					EntryProbe:  "uprobe_TellGrain",
+					ReturnProbe: "uprobe_TellGrain_Returns",
+					FailureMode: probe.FailureModeWarn,
+				},
+				{
+					// Local grain request entry point; GrainContext.AskGrain
+					// delegates here, so grain-to-grain requests are covered too.
+					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).AskGrain",
+					EntryProbe:  "uprobe_AskGrain",
+					ReturnProbe: "uprobe_AskGrain_Returns",
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
@@ -972,6 +990,22 @@ func applyRemoteSpan(et uint8, span ptrace.Span, ts eventTimestamps) bool { //no
 		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
 			attribute.String("messaging.operation", "request"),
 			attribute.String("messaging.destination", "actor"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
+		)...)
+	case eventTypeTellGrain:
+		span.SetName("grain.tell")
+		span.SetKind(ptrace.SpanKindProducer)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "send"),
+			attribute.String("messaging.destination", "grain"),
+			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
+		)...)
+	case eventTypeAskGrain:
+		span.SetName("grain.ask")
+		span.SetKind(ptrace.SpanKindClient)
+		pdataconv.Attributes(span.Attributes(), append(baseAttrs,
+			attribute.String("messaging.operation", "request"),
+			attribute.String("messaging.destination", "grain"),
 			attribute.Int64("messaging.message.sent_timestamp", int64(ts.sent)),
 		)...)
 	case eventTypeBatchTell:

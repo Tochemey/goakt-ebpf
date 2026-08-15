@@ -7,20 +7,23 @@
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main)](https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l)](https://codecov.io/gh/Tochemey/goakt-ebpf)
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+<a href="https://human-oss.dev"><img src="https://human-oss.dev/badge.svg" alt="Open Source AI Manifesto" /></a>
+<a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ"><img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack" /></a>
 
 Zero-instrumentation tracing agent for [GoAkt](https://github.com/tochemey/goakt) actor systems.
 It attaches to a running GoAkt v4 application and produces actor-level traces. Your application does not need code changes, redeployment, or an SDK dependency.
 
 ## How It Works
 
-goakt-ebpf runs as a sidecar process alongside your GoAkt application. It uses [eBPF](https://ebpf.io/) uprobes to observe actor message handling at runtime and exports traces via the [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otlp/) to any compatible backend such as Jaeger, Grafana Tempo, or Honeycomb.
+goakt-ebpf runs as a sidecar process alongside your GoAkt application. It uses [eBPF](https://ebpf.io/) uprobes to observe actor message handling at runtime and exports traces via the [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otlp/) to any compatible backend such as SigNoz, Jaeger, Grafana Tempo, or Honeycomb.
 
 ```
 Your GoAkt app          goakt-ebpf agent         OTLP backend
  ┌────────────┐          ┌────────────┐          ┌──────────┐
- │ actor.Tell │◄─uprobe──│  captures  │ ──OTLP──▶│  Jaeger  │
- │ actor.Ask  │          │  spans     │          │  Tempo   │
- │ doReceive  │          │            │          │  etc.    │
+ │ actor.Tell │◄─uprobe──│  captures  │ ──OTLP──▶│  SigNoz  │
+ │ actor.Ask  │          │  spans     │          │  Jaeger  │
+ │ doReceive  │          │            │          │  Tempo   │
  └────────────┘          └────────────┘          └──────────┘
       (no changes)        (sidecar process)
 ```
@@ -45,6 +48,8 @@ To enable this:
 4. Pass that context into actor calls: `actor.Tell(ctx, pid, msg)`, `actor.Ask(ctx, pid, msg)`, and the rest.
 
 If any of these steps is missing, actor spans still appear, but they are not linked to your application spans and show up as root spans.
+
+HTTP middleware such as `otelhttp` stores the span on a cancelable request context. The agent reads that context from process memory; a raw `r.Context()` is easy to miss. The [integration example](examples/integration/README.md) rebinds the current span onto a non-cancelable `valueCtx` before `Tell`/`Ask` so HTTP traces link the same way as manual `tracer.Start` spans.
 
 **Not supported:** The OpenTelemetry Auto SDK (`go.opentelemetry.io/auto/sdk`) does not work for parent-child linking, because its span context is zero-initialized in user space.
 
@@ -90,15 +95,23 @@ sudo ./goakt-ebpf -exe /path/to/your-goakt-app
 
 ### Try it locally
 
-Run the full integration example with Docker Compose:
+Run the full integration example with Docker Compose. It starts a GoAkt app, the eBPF agent, and a self-hosted [SigNoz](https://signoz.io/) UI:
 
 ```bash
-make build && make start && make view   # opens Jaeger UI
+make build    # fetch SigNoz and build images (first run can take several minutes)
+make start    # start the stack and call GET /echo and GET /ask
+make view     # open SigNoz at http://localhost:8080
 ```
 
-Or run `docker compose -f examples/integration/docker-compose.yml up --build`, then open http://localhost:16686.
+Log in with `admin@goakt.local` / `GoAkt-eBPF-2026!` (local demo only). In **Traces**, switch to **Trace View** and open a `GET /echo` or `GET /ask` trace. You should see:
 
-See [examples/integration/README.md](examples/integration/README.md) for Lima setup on macOS.
+```
+GET /ask                      ← integration-app (otelhttp)
+  └── actor.doReceive         ← goakt-ebpf
+        └── actor.process     ← goakt-ebpf
+```
+
+The app also emits `send-tell` / `send-ask` every 5 seconds with the same 3-level tree. See [examples/integration/README.md](examples/integration/README.md) for Lima setup on macOS, credentials, and troubleshooting.
 
 ## Configuration
 
@@ -129,6 +142,7 @@ The agent produces spans for actor operations without any code changes:
 |-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
 | **Message handling (PID)**        | `actor.doReceive`, `actor.process`                                                                                                                                                        | When actors receive and process messages, with timing and success/failure. |
 | **Grain processing**              | `grain.doReceive`, `grain.process`                                                                                                                                                        | Grain message handling and lifecycle.                                      |
+| **Grain messaging**               | `grain.tell`, `grain.ask`                                                                                                                                                                 | Local grain sends and requests (client-side).                              |
 | **Remote messaging (System)**     | `actorSystem.remoteTell`, `actorSystem.remoteAsk`, `actorSystem.remoteTellReceive`, `actorSystem.remoteAskReceive`                                                                        | Sends and receives across nodes.                                           |
 | **Remote grains**                 | `grain.remoteTell`, `grain.remoteAsk`, `grain.remoteTellReceive`, `grain.remoteAskReceive`, `grain.remoteActivate`                                                                        | Cross-node grain operations.                                               |
 | **Spawn lifecycle (System)**      | `actorSystem.spawn`, `actorSystem.spawnOn`, `actorSystem.actorOf`, `actorSystem.spawnNamedFromFunc`, `actorSystem.spawnFromFunc`, `actorSystem.spawnRouter`, `actorSystem.spawnSingleton` | Actor system spawn operations.                                             |
@@ -214,16 +228,13 @@ make docker-test       # runs generate + tests in Docker
 | `operation not permitted`              | eBPF not supported (Docker Desktop, missing capabilities) | Run on Linux. Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON`. On macOS use [Lima](examples/integration/README.md).                          |
 | `could not find offset for function`   | Symbol missing (stripped binary, older GoAkt)             | Build without `-ldflags="-s -w"`. Optional probes log a warning and continue.                                                                 |
 | No spans in backend                    | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                             |
-| Actor spans are root spans (no parent) | Context not propagated, or Auto SDK used                  | Pass the HTTP/gRPC `ctx` into `actor.Tell`/`Ask`. Use the standard OTEL SDK, not Auto SDK. Enable debug: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
+| Actor spans are root spans (no parent) | Context not propagated, Auto SDK used, or raw `otelhttp` request context | Pass the HTTP/gRPC `ctx` into `actor.Tell`/`Ask`. Use the standard OTEL SDK, not Auto SDK. For `otelhttp`, rebind the span as in the [integration example](examples/integration/README.md). Enable debug: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
 | `bpf_x86_bpfel.o: no matching files`   | BPF objects not generated                                 | Run `make docker-generate` (macOS/Windows) or `go generate ./...` (Linux).                                                                    |
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): eBPF probe design, span layout heuristics, and context extraction internals.
-- [Integration Example](examples/integration/README.md): full Docker Compose setup with Jaeger.
+- [Integration Example](examples/integration/README.md): full Docker Compose setup with SigNoz.
+- [Grains Example](examples/grains/README.md): virtual actors (grains) traced end-to-end with zero instrumentation code.
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
