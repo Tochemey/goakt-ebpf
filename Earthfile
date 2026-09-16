@@ -5,7 +5,7 @@
 VERSION 0.8
 
 # Base image with Go and build tools for eBPF (clang, llvm, libbpf)
-FROM golang:1.26-bookworm
+FROM golang:1.27-bookworm
 
 # Install eBPF build dependencies: clang, llvm, linux headers
 # Use linux-headers-generic for platform-agnostic headers (works on amd64 and arm64)
