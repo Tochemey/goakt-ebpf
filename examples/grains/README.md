@@ -52,7 +52,7 @@ Everything runs in Docker ([docker-compose.yml](docker-compose.yml)): the
 OTel Collector + Jaeger backend, the app, and the agent attached to the
 app's PID namespace. eBPF needs a Linux kernel — native on Linux, via
 [Lima](https://github.com/lima-vm/lima) on macOS (`make verify-lima`;
-Docker Desktop's VM does not support eBPF, see
+Docker Desktop's VM supports eBPF only in some releases, see
 [../integration](../integration/README.md) for Lima setup).
 
 From the repo root:

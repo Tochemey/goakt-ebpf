@@ -88,17 +88,21 @@ struct goakt_actor_span_t {
 	u8 handled_successfully; /* 1 = success, 0 = failure (handleReceivedError called) */
 	u8 padding[6];
 	BASE_SPAN_PROPERTIES
-	u64 context_ptr; /* context.Context data pointer for userspace trace extraction */
-	/* Pointer to the *ReceiveContext / *GrainContext this span belongs to.
-	 * The same pointer flows through the mailbox from the enqueue probe
-	 * (doReceive/receive) to the handling probe (handleReceived/
-	 * handleGrainContext), which run on different goroutines in GoAkt v4.
-	 * Userspace uses it to link the handling span under its enqueue span. */
-	u64 receive_ctx_ptr;
 };
 
 struct uprobe_data_t {
 	struct goakt_actor_span_t span;
+	/* Distance of the probed frame from the top of the goroutine stack.
+	 * Go keeps it when it copies a stack, so it tells a restart of the same
+	 * call apart from a nested one. Not sent to userspace. */
+	u64 frame_depth;
+	/* Parent found by the eBPF lookups (context chain or goid), before an
+	 * app span replaces it in span.psc. Context tracking is restored from
+	 * it on return. Not sent to userspace. */
+	struct span_context tracked_psc;
+	/* *ReceiveContext / *GrainContext a handling span belongs to, whose
+	 * enqueue record is released on return. 0 for every other span. */
+	u64 handled_msg;
 	/* Saved goid->sc entry that this span shadowed on entry, restored on
 	 * return so an outer span keeps propagating after a nested span ends.
 	 * Not sent to userspace: only span (goakt_actor_span_t) is output. */
@@ -565,49 +569,147 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT);
 } goakt_actor_goid_to_span_context SEC(".maps");
 
-// get_parent_span_context_goid_first prefers go_context chain, then falls back to goid map.
-// Used as get_parent_span_context_fn so process() and grainPID.process() inherit.
+/* Messages can wait in mailboxes, so allow many more in flight than spans. */
+#define MAX_ENQUEUED_MESSAGES 10240
+
+// The enqueue span of each message in flight, keyed by its *ReceiveContext /
+// *GrainContext. GoAkt v4 enqueues on the caller's goroutine and handles on a
+// dispatcher worker, and the pointer flows through the mailbox between them.
+// Correlating here, in the order the kernel saw the calls, stays exact when
+// GoAkt pools and reuses the pointer; correlating in userspace did not,
+// because perf events can arrive out of order.
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, u64); /* *ReceiveContext or *GrainContext */
+	__type(value, struct span_context);
+	__uint(max_entries, MAX_ENQUEUED_MESSAGES);
+} goakt_actor_enqueued SEC(".maps");
+
+// The *ReceiveContext each goroutine built and has not yet passed to
+// doReceive. build and doReceive both run for one Tell/Ask; the entry lets
+// doReceive recognize that message and leave it to the build span.
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, u64); /* goroutine */
+	__type(value, u64); /* *ReceiveContext */
+	__uint(max_entries, MAX_CONCURRENT);
+} goakt_actor_built SEC(".maps");
+
+// continues_build reports whether doReceive for msg follows the build call
+// this goroutine made for it. It stays true until doReceive returns, so a
+// restarted doReceive is recognized again.
+static __always_inline bool continues_build(u64 goid, u64 msg) {
+	u64 *built = bpf_map_lookup_elem(&goakt_actor_built, &goid);
+	return built != NULL && *built == msg;
+}
+
+// release_enqueue forgets the enqueue record of a handled message, unless
+// the pointer already carries the record of a newer message.
+static __always_inline void release_enqueue(u64 msg, struct span_context *enqueue_sc) {
+	struct span_context *sc = bpf_map_lookup_elem(&goakt_actor_enqueued, &msg);
+	if (sc == NULL) {
+		return;
+	}
+
+	u64 recorded, handled;
+	__builtin_memcpy(&recorded, sc->SpanID, sizeof(recorded));
+	__builtin_memcpy(&handled, enqueue_sc->SpanID, sizeof(handled));
+	if (recorded == handled) {
+		bpf_map_delete_elem(&goakt_actor_enqueued, &msg);
+	}
+}
+
+static __always_inline void find_app_span_context(struct go_iface *ctx, struct span_context *out);
+
+// get_parent_span_context_goid_first resolves a span's parent: the enqueue
+// span of the message being handled, else the app (OTel SDK) span on the
+// context, else the eBPF span on the go_context chain, else the goroutine's.
+// Used as get_parent_span_context_fn, so the sampler sees that parent and an
+// unsampled app trace is left unsampled.
 struct goid_parent_handle {
 	struct pt_regs *ctx;
 	struct go_iface *go_context;
+	/* *ReceiveContext / *GrainContext being handled; 0 for other spans. */
+	u64 handled_msg;
+	/* Out: the eBPF parent, which context tracking is restored from on
+	 * return, also when an app span is the parent. */
+	struct span_context *tracked_psc;
 };
 
 static long get_parent_span_context_goid_first(void *handle, struct span_context *psc) {
 	struct goid_parent_handle *h = (struct goid_parent_handle *)handle;
-	struct span_context *from_ctx = get_parent_span_context(h->go_context);
-	if (from_ctx != NULL) {
-		*psc = *from_ctx;
-		return 0;
+	if (h->handled_msg != 0) {
+		struct span_context *enqueue_sc =
+			bpf_map_lookup_elem(&goakt_actor_enqueued, &h->handled_msg);
+		if (enqueue_sc != NULL) {
+			*psc = *enqueue_sc;
+			return 0;
+		}
 	}
 
+	long found = -1;
 	void *goid = (void *)GOROUTINE(h->ctx);
-	struct span_context *from_goid =
-		bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &goid);
-	if (from_goid != NULL) {
-		*psc = *from_goid;
-		return 0;
+	struct span_context *ebpf_psc = get_parent_span_context(h->go_context);
+	if (ebpf_psc == NULL) {
+		ebpf_psc = bpf_map_lookup_elem(&goakt_actor_goid_to_span_context, &goid);
 	}
-	return -1;
+
+	if (ebpf_psc != NULL) {
+		*psc = *ebpf_psc;
+		*h->tracked_psc = *ebpf_psc;
+		found = 0;
+	}
+
+	if (h->go_context->data != NULL) {
+		struct span_context app_psc = {0};
+		find_app_span_context(h->go_context, &app_psc);
+		if (!bpf_is_zero(app_psc.SpanID, SPAN_ID_SIZE)) {
+			*psc = app_psc;
+			found = 0;
+		}
+	}
+
+	return found;
 }
 
 /* An active same-symbol entry older than this indicates a missed return probe
- * (e.g. the function restarted through the Go stack-growth path, re-firing the
- * entry probe and leaving an unmatched map entry). The instrumented functions
- * complete in well under this bound, and without healing a single missed
- * return silently swallows every subsequent call on that goroutine forever. */
+ * (the function was unwound without returning, leaving an unmatched map
+ * entry). The instrumented functions complete in well under this bound, and
+ * without healing a single missed return silently swallows every subsequent
+ * call on that goroutine forever. */
 #define MAX_ACTIVE_SPAN_AGE_NS (10ULL * 1000000000ULL)
 
+/* runtime.g starts with stack{lo, hi uintptr}. */
+#define GO_G_STACK_HI_OFF 8
+
+// frame_depth returns how far below the top of the goroutine stack the probed
+// function's frame is. Stack copies preserve it; a nested call is deeper.
+static __always_inline u64 frame_depth(struct pt_regs *ctx) {
+	u64 hi = 0;
+	bpf_probe_read_user(&hi, sizeof(hi), (void *)GOROUTINE(ctx) + GO_G_STACK_HI_OFF);
+	return hi - (u64)PT_REGS_SP(ctx);
+}
+
 // actor_reentered reports whether a span for this key is already active on the
-// goroutine (same-symbol re-entry). When so, it bumps the nesting depth so the
-// matching return does not emit the span early, and the caller should return.
-// Entries whose return probe was missed are dropped so the goroutine heals.
-static __always_inline bool actor_reentered(void *map, void *key) {
+// goroutine, in which case the caller should return without starting a span.
+// The frame depth tells the cases apart:
+//   - deeper: a nested call of the same function. The nesting depth is bumped
+//     so the matching return does not emit the span early.
+//   - same: Go restarted the call, after growing the stack or preempting the
+//     goroutine in the function's prologue, which re-fires the entry probe.
+//     The active span covers it.
+//   - shallower, or older than MAX_ACTIVE_SPAN_AGE_NS: the active call was
+//     unwound without its return probe firing. It is dropped so the goroutine
+//     heals, and the caller starts a span.
+static __always_inline bool actor_reentered(struct pt_regs *ctx, void *map, void *key) {
 	struct uprobe_data_t *d = bpf_map_lookup_elem(map, &key);
 	if (d == NULL) {
 		return false;
 	}
 
-	if (bpf_ktime_get_ns() - d->span.start_time > MAX_ACTIVE_SPAN_AGE_NS) {
+	u64 depth = frame_depth(ctx);
+	u64 age = bpf_ktime_get_ns() - d->span.start_time;
+	if (age > MAX_ACTIVE_SPAN_AGE_NS || depth < d->frame_depth) {
 		/* Also drop the goid propagation entry, but only when it still
 		 * points at the stale span; otherwise it belongs to a live outer
 		 * span of a different symbol and must be kept. */
@@ -625,34 +727,140 @@ static __always_inline bool actor_reentered(void *map, void *key) {
 		return false;
 	}
 
-	d->depth++;
+	if (depth > d->frame_depth) {
+		d->depth++;
+	}
+
 	return true;
 }
 
-// set_receive_ctx_ptr records the *ReceiveContext / *GrainContext pointer on the
-// span just stored in map for key, so userspace can correlate the enqueue span
-// (doReceive/receive) with the handling span (handleReceived/handleGrainContext)
-// that carries the same pointer.
-static __always_inline void set_receive_ctx_ptr(void *map, void *key, u64 ptr) {
-	struct uprobe_data_t *d = bpf_map_lookup_elem(map, &key);
-	if (d != NULL) {
-		d->span.receive_ctx_ptr = ptr;
+/* Go runtime layouts used by the context walk. */
+#define GO_ITAB_TYPE_OFF 8 /* runtime.itab._type */
+#define GO_IFACE_DATA_OFF 8 /* interface value: {itab or type, data} */
+/* context.valueCtx: parent Context at 0, key any at 16, val any at 32. */
+#define VALUE_CTX_KEY_TYPE_OFF 16
+#define VALUE_CTX_VAL_TYPE_OFF 32
+#define VALUE_CTX_VAL_DATA_OFF 40
+#define MAX_APP_CTX_DEPTH 32
+
+// embeds_parent_ctx reports whether a context of this runtime type is a
+// standard library context that holds its parent Context as the first field.
+static __always_inline bool embeds_parent_ctx(u64 typ) {
+	return typ == ctx_type_value || typ == ctx_type_cancel || typ == ctx_type_timer ||
+	       typ == ctx_type_after_func || typ == ctx_type_without_cancel ||
+	       typ == ctx_type_stop;
+}
+
+// span_sc_offset returns where the SpanContext sits in an OTel span of this
+// runtime type, or 0 for a span type that is not read (e.g. Auto SDK).
+static __always_inline u64 span_sc_offset(u64 typ) {
+	if (typ == otel_span_type_recording) {
+		return otel_recording_span_sc_offset;
+	}
+
+	if (typ == otel_span_type_sdk_nonrecording) {
+		return otel_sdk_nonrecording_span_sc_offset;
+	}
+
+	if (typ == otel_span_type_api_nonrecording) {
+		return otel_api_nonrecording_span_sc_offset;
+	}
+
+	return 0;
+}
+
+// read_span_context copies the SpanContext at off in an OTel span, whose
+// leading TraceID, SpanID and TraceFlags match struct span_context. It is
+// accepted only when both IDs are non-zero.
+static __always_inline void read_span_context(void *span, u64 off, struct span_context *out) {
+	struct span_context sc = {0};
+	if (bpf_probe_read_user(&sc, TRACE_ID_SIZE + SPAN_ID_SIZE + TRACE_FLAGS_SIZE,
+				span + off) != 0) {
+		return;
+	}
+
+	if (bpf_is_zero(sc.TraceID, TRACE_ID_SIZE) || bpf_is_zero(sc.SpanID, SPAN_ID_SIZE)) {
+		return;
+	}
+
+	*out = sc;
+}
+
+// find_app_span_context walks the context.Context chain from ctx and stores
+// the current OTel span's context in out. Nodes and values are identified by
+// their Go runtime type, so a span is only read from memory that really is
+// one. The walk ends at the root context. A context type it does not know is
+// taken to embed its parent Context first, as custom contexts usually do, and
+// the walk goes on only if that parent is a standard context.
+static __always_inline void find_app_span_context(struct go_iface *ctx,
+						  struct span_context *out) {
+	void *itab = ctx->type;
+	void *node = ctx->data;
+	bool after_custom = false;
+
+	for (int i = 0; i < MAX_APP_CTX_DEPTH; i++) {
+		if (itab == NULL || node == NULL) {
+			return;
+		}
+
+		u64 typ = 0;
+		if (bpf_probe_read_user(&typ, sizeof(typ), itab + GO_ITAB_TYPE_OFF) != 0 || typ == 0 ||
+		    typ == ctx_type_background || typ == ctx_type_todo) {
+			return;
+		}
+
+		bool standard = embeds_parent_ctx(typ);
+		if (!standard && after_custom) {
+			return;
+		}
+
+		after_custom = !standard;
+
+		if (typ == ctx_type_value) {
+			u64 key_type = 0;
+			bpf_probe_read_user(&key_type, sizeof(key_type),
+					    node + VALUE_CTX_KEY_TYPE_OFF);
+			if (key_type == otel_span_key_type) {
+				/* The nearest span entry is the current span: use it
+				 * or nothing, never an outer one. */
+				u64 val_type = 0;
+				void *val = NULL;
+				bpf_probe_read_user(&val_type, sizeof(val_type),
+						    node + VALUE_CTX_VAL_TYPE_OFF);
+				bpf_probe_read_user(&val, sizeof(val), node + VALUE_CTX_VAL_DATA_OFF);
+				u64 off = span_sc_offset(val_type);
+				if (off != 0 && val != NULL) {
+					read_span_context(val, off, out);
+				}
+
+				return;
+			}
+		}
+
+		if (bpf_probe_read_user(&itab, sizeof(itab), node) != 0 ||
+		    bpf_probe_read_user(&node, sizeof(node), node + GO_IFACE_DATA_OFF) != 0) {
+			return;
+		}
 	}
 }
 
 // Context extraction params: context_pos 0 = no context (e.g. process()).
 // passed_as_arg: 1 = context.Context as direct arg, 0 = context inside struct.
-static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
-						 struct uprobe_data_t *uprobe_data,
-						 u8 event_type, void *map,
-						 int context_pos, u64 context_offset,
-						 bool passed_as_arg) {
+// handled_msg: the *ReceiveContext / *GrainContext a handling span belongs to,
+// whose enqueue span becomes its parent; NULL for every other span.
+static __always_inline void start_span_and_store_msg(struct pt_regs *ctx, void *key,
+						     struct uprobe_data_t *uprobe_data,
+						     u8 event_type, void *map,
+						     int context_pos, u64 context_offset,
+						     bool passed_as_arg, void *handled_msg) {
 	__builtin_memset(uprobe_data, 0, sizeof(struct uprobe_data_t));
 
 	struct goakt_actor_span_t *span = &uprobe_data->span;
 	span->event_type = event_type;
 	span->handled_successfully = 1; /* default success; handleReceivedError sets 0 */
 	span->start_time = bpf_ktime_get_ns();
+	uprobe_data->frame_depth = frame_depth(ctx);
+	uprobe_data->handled_msg = (u64)handled_msg;
 
 	struct go_iface go_context = {0};
 	if (context_pos > 0) {
@@ -663,6 +871,8 @@ static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 	struct goid_parent_handle goid_handle = {
 		.ctx = ctx,
 		.go_context = &go_context,
+		.handled_msg = (u64)handled_msg,
+		.tracked_psc = &uprobe_data->tracked_psc,
 	};
 	start_span_params_t start_span_params = {
 		.ctx = ctx,
@@ -676,7 +886,6 @@ static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 
 	if (go_context.data != NULL) {
 		start_tracking_span(go_context.data, &span->sc);
-		span->context_ptr = (u64)(long)go_context.data;
 	}
 
 	/* Save any goid->sc entry we are about to shadow so the outer span's
@@ -691,6 +900,15 @@ static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
 	bpf_map_update_elem(&goakt_actor_goid_to_span_context, &goid_key, &span->sc, 0);
 
 	bpf_map_update_elem(map, &key, uprobe_data, 0);
+}
+
+static __always_inline void start_span_and_store(struct pt_regs *ctx, void *key,
+						 struct uprobe_data_t *uprobe_data,
+						 u8 event_type, void *map,
+						 int context_pos, u64 context_offset,
+						 bool passed_as_arg) {
+	start_span_and_store_msg(ctx, key, uprobe_data, event_type, map, context_pos,
+				 context_offset, passed_as_arg, NULL);
 }
 
 static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *key,
@@ -714,7 +932,10 @@ static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *ke
 	span->end_time = end_time;
 
 	output_span_event(ctx, span, sizeof(*span), &span->sc);
-	stop_tracking_span(&span->sc, &span->psc);
+	stop_tracking_span(&span->sc, &uprobe_data->tracked_psc);
+	if (uprobe_data->handled_msg != 0) {
+		release_enqueue(uprobe_data->handled_msg, &span->psc);
+	}
 
 	/* Restore the goid->sc entry we shadowed on entry (if any) so an outer
 	 * span keeps propagating; only delete when we were the outermost. */
@@ -733,7 +954,7 @@ static __always_inline void finish_span_and_output(struct pt_regs *ctx, void *ke
 SEC("uprobe/doReceive")
 int uprobe_doReceive(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_do_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_do_receive, key)) {
 		return 0;
 	}
 
@@ -744,10 +965,15 @@ int uprobe_doReceive(struct pt_regs *ctx) {
 		return 0;
 	}
 
+	u64 msg = (u64)get_argument(ctx, 2);
+	if (continues_build((u64)key, msg)) {
+		return 0;
+	}
+
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_DO_RECEIVE,
 			    &goakt_actor_do_receive, 2,
 			    receive_context_ctx_offset, false);
-	set_receive_ctx_ptr(&goakt_actor_do_receive, key, (u64)get_argument(ctx, 2));
+	bpf_map_update_elem(&goakt_actor_enqueued, &msg, &uprobe_data->span.sc, BPF_ANY);
 	return 0;
 }
 
@@ -755,6 +981,7 @@ SEC("uprobe/doReceive_Returns")
 int uprobe_doReceive_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
 	finish_span_and_output(ctx, key, &goakt_actor_do_receive);
+	bpf_map_delete_elem(&goakt_actor_built, &key);
 	return 0;
 }
 
@@ -765,7 +992,7 @@ int uprobe_doReceive_Returns(struct pt_regs *ctx) {
 SEC("uprobe/receiveContextBuild")
 int uprobe_receiveContextBuild(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_receive_ctx_build, key)) {
+	if (actor_reentered(ctx, &goakt_actor_receive_ctx_build, key)) {
 		return 0;
 	}
 
@@ -776,33 +1003,17 @@ int uprobe_receiveContextBuild(struct pt_regs *ctx) {
 		return 0;
 	}
 
+	u64 msg = (u64)get_argument(ctx, 1);
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_DO_RECEIVE,
 			    &goakt_actor_receive_ctx_build, 2, 0, true);
-	set_receive_ctx_ptr(&goakt_actor_receive_ctx_build, key, (u64)get_argument(ctx, 1));
+	bpf_map_update_elem(&goakt_actor_enqueued, &msg, &uprobe_data->span.sc, BPF_ANY);
+	bpf_map_update_elem(&goakt_actor_built, &key, &msg, BPF_ANY);
 	return 0;
 }
 
 SEC("uprobe/receiveContextBuild_Returns")
 int uprobe_receiveContextBuild_Returns(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	/* build has now stored ctx on the pooled ReceiveContext. Prefer that
-	 * pointer: for Tell it is WithoutCancel(reqCtx), which stays reachable
-	 * for as long as the message sits in the mailbox. The entry-time
-	 * argument can die as soon as the HTTP handler returns. */
-	struct uprobe_data_t *d =
-		bpf_map_lookup_elem(&goakt_actor_receive_ctx_build, &key);
-	if (d != NULL && d->span.receive_ctx_ptr != 0 &&
-	    receive_context_ctx_offset != 0) {
-		struct go_iface stored = {0};
-		void *field = (void *)(d->span.receive_ctx_ptr + receive_context_ctx_offset);
-		bpf_probe_read(&stored.type, sizeof(stored.type), field);
-		bpf_probe_read(&stored.data, sizeof(stored.data),
-			       get_go_interface_instance(field));
-		if (stored.data != NULL) {
-			d->span.context_ptr = (u64)(long)stored.data;
-			start_tracking_span(stored.data, &d->span.sc);
-		}
-	}
 	finish_span_and_output(ctx, key, &goakt_actor_receive_ctx_build);
 	return 0;
 }
@@ -811,7 +1022,7 @@ int uprobe_receiveContextBuild_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleRemoteTell")
 int uprobe_handleRemoteTell(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_tell, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_tell, key)) {
 		return 0;
 	}
 
@@ -838,7 +1049,7 @@ int uprobe_handleRemoteTell_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleRemoteAsk")
 int uprobe_handleRemoteAsk(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_ask, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_ask, key)) {
 		return 0;
 	}
 
@@ -867,7 +1078,7 @@ int uprobe_handleRemoteAsk_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleReceived")
 int uprobe_handleReceived(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_process, key)) {
+	if (actor_reentered(ctx, &goakt_actor_process, key)) {
 		return 0;
 	}
 
@@ -878,9 +1089,8 @@ int uprobe_handleReceived(struct pt_regs *ctx) {
 		return 0;
 	}
 
-	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_PROCESS,
-			    &goakt_actor_process, 0, 0, false);
-	set_receive_ctx_ptr(&goakt_actor_process, key, (u64)get_argument(ctx, 2));
+	start_span_and_store_msg(ctx, key, uprobe_data, EVENT_TYPE_PROCESS,
+				 &goakt_actor_process, 0, 0, false, get_argument(ctx, 2));
 	return 0;
 }
 
@@ -896,7 +1106,7 @@ int uprobe_handleReceived_Returns(struct pt_regs *ctx) {
 SEC("uprobe/grainReceive")
 int uprobe_grainReceive(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_grain_do_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_grain_do_receive, key)) {
 		return 0;
 	}
 
@@ -910,7 +1120,8 @@ int uprobe_grainReceive(struct pt_regs *ctx) {
 	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_DO_RECEIVE,
 			    &goakt_actor_grain_do_receive, 2,
 			    grain_context_ctx_offset, false);
-	set_receive_ctx_ptr(&goakt_actor_grain_do_receive, key, (u64)get_argument(ctx, 2));
+	u64 msg = (u64)get_argument(ctx, 2);
+	bpf_map_update_elem(&goakt_actor_enqueued, &msg, &uprobe_data->span.sc, BPF_ANY);
 	return 0;
 }
 
@@ -927,7 +1138,7 @@ int uprobe_grainReceive_Returns(struct pt_regs *ctx) {
 SEC("uprobe/handleGrainContext")
 int uprobe_handleGrainContext(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_grain_process, key)) {
+	if (actor_reentered(ctx, &goakt_actor_grain_process, key)) {
 		return 0;
 	}
 
@@ -938,9 +1149,8 @@ int uprobe_handleGrainContext(struct pt_regs *ctx) {
 		return 0;
 	}
 
-	start_span_and_store(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_PROCESS,
-			    &goakt_actor_grain_process, 0, 0, false);
-	set_receive_ctx_ptr(&goakt_actor_grain_process, key, (u64)get_argument(ctx, 2));
+	start_span_and_store_msg(ctx, key, uprobe_data, EVENT_TYPE_GRAIN_PROCESS,
+				 &goakt_actor_grain_process, 0, 0, false, get_argument(ctx, 2));
 	return 0;
 }
 
@@ -955,7 +1165,7 @@ int uprobe_handleGrainContext_Returns(struct pt_regs *ctx) {
 SEC("uprobe/Spawn")
 int uprobe_Spawn(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_system_spawn, key)) {
+	if (actor_reentered(ctx, &goakt_actor_system_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -980,7 +1190,7 @@ int uprobe_Spawn_Returns(struct pt_regs *ctx) {
 SEC("uprobe/SpawnOn")
 int uprobe_SpawnOn(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_spawn_on, key)) {
+	if (actor_reentered(ctx, &goakt_actor_spawn_on, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1004,7 +1214,7 @@ int uprobe_SpawnOn_Returns(struct pt_regs *ctx) {
 SEC("uprobe/SpawnChild")
 int uprobe_SpawnChild(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_spawn_child, key)) {
+	if (actor_reentered(ctx, &goakt_actor_spawn_child, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1029,7 +1239,7 @@ int uprobe_SpawnChild_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteSpawnHandler")
 int uprobe_remoteSpawnHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_spawn, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1054,7 +1264,7 @@ int uprobe_remoteSpawnHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteSpawnChildHandler")
 int uprobe_remoteSpawnChildHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_spawn_child, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_spawn_child, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1079,7 +1289,7 @@ int uprobe_remoteSpawnChildHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellHandler")
 int uprobe_remoteTellHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_tell_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_tell_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1104,7 +1314,7 @@ int uprobe_remoteTellHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskHandler")
 int uprobe_remoteAskHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_ask_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_ask_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1129,7 +1339,7 @@ int uprobe_remoteAskHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/Relocate")
 int uprobe_Relocate(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_relocation, key)) {
+	if (actor_reentered(ctx, &goakt_actor_relocation, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1154,7 +1364,7 @@ int uprobe_Relocate_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellGrain")
 int uprobe_remoteTellGrain(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_tell_grain, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_tell_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1178,7 +1388,7 @@ int uprobe_remoteTellGrain_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskGrain")
 int uprobe_remoteAskGrain(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_ask_grain, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_ask_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1202,7 +1412,7 @@ int uprobe_remoteAskGrain_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteLookupHandler")
 int uprobe_remoteLookupHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_lookup, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_lookup, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1226,7 +1436,7 @@ int uprobe_remoteLookupHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteReSpawnHandler")
 int uprobe_remoteReSpawnHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_re_spawn, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_re_spawn, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1250,7 +1460,7 @@ int uprobe_remoteReSpawnHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStopHandler")
 int uprobe_remoteStopHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_stop, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_stop, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1274,7 +1484,7 @@ int uprobe_remoteStopHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteAskGrainHandler")
 int uprobe_remoteAskGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_ask_grain_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_ask_grain_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1298,7 +1508,7 @@ int uprobe_remoteAskGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteTellGrainHandler")
 int uprobe_remoteTellGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_tell_grain_receive, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_tell_grain_receive, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1322,7 +1532,7 @@ int uprobe_remoteTellGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteActivateGrainHandler")
 int uprobe_remoteActivateGrainHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_activate_grain, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_activate_grain, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1346,7 +1556,7 @@ int uprobe_remoteActivateGrainHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteReinstateHandler")
 int uprobe_remoteReinstateHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_reinstate, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_reinstate, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1370,7 +1580,7 @@ int uprobe_remoteReinstateHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remotePassivationStrategyHandler")
 int uprobe_remotePassivationStrategyHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_passivation_strategy, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_passivation_strategy, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1394,7 +1604,7 @@ int uprobe_remotePassivationStrategyHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStateHandler")
 int uprobe_remoteStateHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_state, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_state, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1418,7 +1628,7 @@ int uprobe_remoteStateHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteChildrenHandler")
 int uprobe_remoteChildrenHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_children, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_children, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1442,7 +1652,7 @@ int uprobe_remoteChildrenHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteParentHandler")
 int uprobe_remoteParentHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_parent, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_parent, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1466,7 +1676,7 @@ int uprobe_remoteParentHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteKindHandler")
 int uprobe_remoteKindHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_kind, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_kind, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1490,7 +1700,7 @@ int uprobe_remoteKindHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteDependenciesHandler")
 int uprobe_remoteDependenciesHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_dependencies, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_dependencies, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1514,7 +1724,7 @@ int uprobe_remoteDependenciesHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteMetricHandler")
 int uprobe_remoteMetricHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_metric, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_metric, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1538,7 +1748,7 @@ int uprobe_remoteMetricHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteRoleHandler")
 int uprobe_remoteRoleHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_role, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_role, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1562,7 +1772,7 @@ int uprobe_remoteRoleHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/remoteStashSizeHandler")
 int uprobe_remoteStashSizeHandler(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_remote_stash_size, key)) {
+	if (actor_reentered(ctx, &goakt_actor_remote_stash_size, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1586,7 +1796,7 @@ int uprobe_remoteStashSizeHandler_Returns(struct pt_regs *ctx) {
 SEC("uprobe/ActorOf")
 int uprobe_ActorOf(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_actor_of, key)) {
+	if (actor_reentered(ctx, &goakt_actor_actor_of, key)) {
 		return 0;
 	}
 	u32 map_id = 0;
@@ -1643,7 +1853,7 @@ PROBE_ENTRY_RETURN(AskGrain, goakt_actor_ask_grain, EVENT_TYPE_ASK_GRAIN)
 SEC("uprobe/actorSystem_Stop")
 int uprobe_actorSystem_Stop(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_stop, key)) return 0;
+	if (actor_reentered(ctx, &goakt_actor_stop, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1659,7 +1869,7 @@ int uprobe_actorSystem_Stop_Returns(struct pt_regs *ctx) {
 SEC("uprobe/actorSystem_Metric")
 int uprobe_actorSystem_Metric(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_system_metric, key)) return 0;
+	if (actor_reentered(ctx, &goakt_actor_system_metric, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1714,7 +1924,7 @@ PROBE_PID_ENTRY_RETURN(Shutdown, goakt_actor_shutdown, EVENT_TYPE_SHUTDOWN)
 SEC("uprobe/pid_Stop")
 int uprobe_pid_Stop(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_pid_stop, key)) return 0;
+	if (actor_reentered(ctx, &goakt_actor_pid_stop, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;
@@ -1730,7 +1940,7 @@ int uprobe_pid_Stop_Returns(struct pt_regs *ctx) {
 SEC("uprobe/pid_Metric")
 int uprobe_pid_Metric(struct pt_regs *ctx) {
 	void *key = (void *)GOROUTINE(ctx);
-	if (actor_reentered(&goakt_actor_pid_metric, key)) return 0;
+	if (actor_reentered(ctx, &goakt_actor_pid_metric, key)) return 0;
 	u32 map_id = 0;
 	struct uprobe_data_t *uprobe_data = bpf_map_lookup_elem(&goakt_actor_uprobe_storage_map, &map_id);
 	if (uprobe_data == NULL) return 0;

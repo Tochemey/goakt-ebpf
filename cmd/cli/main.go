@@ -143,7 +143,7 @@ func run(logger *slog.Logger, pid int) error {
 		handler,
 		procID,
 		cfg,
-		actor.New(logger, instrumentation.Version, int(procID)),
+		actor.New(logger, instrumentation.Version),
 	)
 	if err != nil {
 		return fmt.Errorf("create manager: %w", err)

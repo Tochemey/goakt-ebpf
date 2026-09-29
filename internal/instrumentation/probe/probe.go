@@ -80,7 +80,7 @@ type Base[BPFObj any, BPFEvent any] struct {
 	// encoding/binary package.
 	ProcessRecord func(perf.Record) (*BPFEvent, error)
 
-	reader          *perf.Reader
+	reader          recordReader
 	collection      *ebpf.Collection
 	closers         []io.Closer
 	samplingManager *sampling.Manager
@@ -97,7 +97,20 @@ const (
 	// readErrorBackoff is how long event processing loops pause after a
 	// perf reader error, preventing a hot spin on persistent failures.
 	readErrorBackoff = 100 * time.Millisecond
+
+	// perfFlushInterval is the longest an event waits in the perf buffer.
+	// The reader is woken once a quarter of a CPU's buffer is filled rather
+	// than for every event, which would cost the traced application a
+	// wakeup per span; events below that mark are read at this interval.
+	perfFlushInterval = 100 * time.Millisecond
 )
+
+// recordReader reads the records the eBPF programs emit.
+type recordReader interface {
+	Read() (perf.Record, error)
+	SetDeadline(time.Time)
+	Close() error
+}
 
 // Manifest returns the Probe's instrumentation Manifest.
 func (i *Base[BPFObj, BPFEvent]) Manifest() Manifest {
@@ -251,12 +264,18 @@ func (i *Base[BPFObj, BPFEvent]) initReader() error {
 	if !ok {
 		return fmt.Errorf("%s map not found", DefaultBufferMapName)
 	}
-	var err error
-	i.reader, err = perf.NewReader(buf, PerfBufferDefaultSizeInPages*os.Getpagesize())
+
+	perCPUBuffer := PerfBufferDefaultSizeInPages * os.Getpagesize()
+	reader, err := perf.NewReaderWithOptions(buf, perCPUBuffer, perf.ReaderOptions{
+		Watermark: perCPUBuffer / 4,
+	})
+
 	if err != nil {
 		return err
 	}
-	i.closers = append(i.closers, i.reader)
+
+	i.reader = reader
+	i.closers = append(i.closers, reader)
 	return nil
 }
 
@@ -287,8 +306,16 @@ func (i *Base[BPFObj, BPFEvent]) buildEBPFCollection(
 }
 
 // read reads a new BPFEvent from the perf Reader.
+//
+// It returns no event and no error when none arrived within
+// perfFlushInterval.
 func (i *Base[BPFObj, BPFEvent]) read() (*BPFEvent, error) {
+	i.reader.SetDeadline(time.Now().Add(perfFlushInterval))
 	record, err := i.reader.Read()
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return nil, nil
+	}
+
 	if err != nil {
 		if !errors.Is(err, perf.ErrClosed) {
 			i.Logger.Error("error reading from perf reader", "error", err)
@@ -687,4 +714,64 @@ type KeyValConst struct {
 // InjectOption returns the appropriately configured [inject.WithKeyValue].
 func (c KeyValConst) InjectOption(*process.Info) (inject.Option, error) {
 	return inject.WithKeyValue(c.Key, c.Val), nil
+}
+
+// GoLayoutConst is a [Const] for where the target keeps Go types and struct
+// fields, read from its DWARF in one pass: the addresses of runtime type
+// descriptors, which let eBPF code identify the dynamic type behind an
+// interface value, and the offsets of struct fields. Anything the binary does
+// not contain is injected as 0.
+type GoLayoutConst struct {
+	// Types maps a constant to the type whose runtime type address it
+	// holds, named as in DWARF (e.g. "*context.valueCtx").
+	Types map[string]string
+	// Fields maps a constant to the struct field whose offset it holds.
+	Fields map[string]process.StructField
+
+	logger *slog.Logger
+}
+
+var _ setLogger = GoLayoutConst{}
+
+// SetLogger sets the Logger for GoLayoutConst operations.
+func (c GoLayoutConst) SetLogger(l *slog.Logger) Const {
+	c.logger = l
+	return c
+}
+
+// InjectOption returns an [inject.WithKeyValues] for all the constants. When
+// the binary's DWARF cannot be read, every constant is 0 so the probe still
+// loads, with the features that need them disabled.
+func (c GoLayoutConst) InjectOption(info *process.Info) (inject.Option, error) {
+	types := make([]string, 0, len(c.Types))
+	for _, t := range c.Types {
+		types = append(types, t)
+	}
+
+	fields := make([]process.StructField, 0, len(c.Fields))
+	for _, f := range c.Fields {
+		fields = append(fields, f)
+	}
+
+	layout, err := info.GoLayout(types, fields)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Warn("cannot read Go types from the target's DWARF; features that need them are disabled",
+				"error", err,
+			)
+		}
+
+		layout = &process.GoLayout{}
+	}
+
+	values := make(map[string]interface{}, len(c.Types)+len(c.Fields))
+	for key, t := range c.Types {
+		values[key] = layout.TypeAddrs[t]
+	}
+
+	for key, f := range c.Fields {
+		values[key] = layout.FieldOffsets[f]
+	}
+
+	return inject.WithKeyValues(values), nil
 }

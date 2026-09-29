@@ -93,10 +93,11 @@ static __always_inline void stop_tracking_span(struct span_context *sc, struct s
         // No parent span, delete the context
         bpf_map_delete_elem(&go_context_to_sc, ctx);
     } else {
-        void *ctx_val = 0;
-        bpf_probe_read_user(&ctx_val, sizeof(ctx_val), ctx);
-        void *parent_ctx_val = 0;
-        bpf_probe_read_user(&parent_ctx_val, sizeof(parent_ctx_val), parent_ctx);
+        // Both are map values: read them directly. A user-memory read of
+        // them fails, which made every context look like its parent's and
+        // left its entry in the map for good.
+        void *ctx_val = *(void **)ctx;
+        void *parent_ctx_val = *(void **)parent_ctx;
 
         if (ctx_val != parent_ctx_val) {
             // Parent with different context, delete the context

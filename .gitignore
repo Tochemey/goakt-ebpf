@@ -17,8 +17,8 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Dependency directories
+vendor/
 
 # Go workspace file
 go.work
@@ -31,12 +31,12 @@ go.work.sum
 bin/
 /examples/integration/.signoz/
 
-# Earthly
-.earthly/
-
-
 # Editor/IDE
 .idea/
 .vscode/
-vendor/
 .claude/
+.DS_Store
+Thumbs.db
+
+.tools/
+*.iml

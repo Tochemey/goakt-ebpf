@@ -3,15 +3,36 @@
   eBPF tracing agent for GoAkt
 </h2>
 
----
-
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main)](https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l)](https://codecov.io/gh/Tochemey/goakt-ebpf)
-<a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-<a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ"><img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack" /></a>
+<p align="center">
+  <a href="https://github.com/Tochemey/goakt-ebpf/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Tochemey/goakt-ebpf/ci.yml?branch=main" alt="GitHub Actions Workflow Status"></a>
+  <a href="https://codecov.io/gh/Tochemey/goakt-ebpf"><img src="https://codecov.io/gh/Tochemey/goakt-ebpf/graph/badge.svg?token=InGAauux3l" alt="codecov"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ"><img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack"></a>
+</p>
 
 Zero-instrumentation tracing agent for [GoAkt](https://github.com/tochemey/goakt) actor systems.
 It attaches to a running GoAkt v4 application and produces actor-level traces. Your application does not need code changes, redeployment, or an SDK dependency.
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+  - [Docker (recommended)](#docker-recommended)
+  - [Bare metal](#bare-metal)
+  - [Try it locally](#try-it-locally)
+- [Configuration](#configuration)
+  - [Flags](#flags)
+  - [Environment Variables](#environment-variables)
+- [Deployment](#deployment)
+  - [Docker Compose](#docker-compose)
+  - [Kubernetes](#kubernetes)
+- [Connecting App Spans to Actor Spans](#connecting-app-spans-to-actor-spans)
+- [Distributed Tracing (Cross-Node)](#distributed-tracing-cross-node)
+- [What You See in Traces](#what-you-see-in-traces)
+- [Building from Source](#building-from-source)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
 
 ## How It Works
 
@@ -27,34 +48,9 @@ Your GoAkt app          goakt-ebpf agent         OTLP backend
       (no changes)        (sidecar process)
 ```
 
-## Connecting App Spans to Actor Spans
-
-If your application already uses the standard OpenTelemetry Go SDK (`go.opentelemetry.io/otel/sdk`) to create spans, whether from HTTP handlers, gRPC interceptors, or manual `tracer.Start` calls, goakt-ebpf links its actor spans as children of your application spans.
-
-The result is a connected trace tree:
-
-```
-GET /api/order                    ← your app span (otelhttp / otelgrpc)
-  └── actor.doReceive             ← goakt-ebpf span (auto-linked)
-        └── actor.process         ← goakt-ebpf span (auto-linked)
-```
-
-To enable this:
-
-1. Use the standard OTEL SDK: `sdktrace.NewTracerProvider(...)` with a sampled exporter.
-2. Set it globally: `otel.SetTracerProvider(tp)`.
-3. Instrument your entry points (HTTP handlers, gRPC interceptors, and so on) so spans exist in `context.Context`.
-4. Pass that context into actor calls: `actor.Tell(ctx, pid, msg)`, `actor.Ask(ctx, pid, msg)`, and the rest.
-
-If any of these steps is missing, actor spans still appear, but they are not linked to your application spans and show up as root spans.
-
-HTTP middleware such as `otelhttp` stores the span on a cancelable request context. The agent reads that context from process memory; a raw `r.Context()` is easy to miss. The [integration example](examples/integration/README.md) rebinds the current span onto a non-cancelable `valueCtx` before `Tell`/`Ask` so HTTP traces link the same way as manual `tracer.Start` spans.
-
-**Not supported:** The OpenTelemetry Auto SDK (`go.opentelemetry.io/auto/sdk`) does not work for parent-child linking, because its span context is zero-initialized in user space.
-
 ## Prerequisites
 
-- **Linux.** eBPF is a Linux kernel feature, so the agent does not run on macOS or Windows. Docker Desktop's VM typically does not support eBPF; use [Lima](https://github.com/lima-vm/lima) on macOS instead (see the [integration example](examples/integration/README.md)).
+- **Linux.** eBPF is a Linux kernel feature, so the agent does not run on macOS or Windows directly. Whether Docker Desktop's Linux VM supports it depends on the release (it worked with a Docker Desktop VM running kernel 7.0); if the agent reports `operation not permitted`, use [Lima](https://github.com/lima-vm/lima) on macOS instead (see the [integration example](examples/integration/README.md)).
 - **Non-stripped binary.** The target Go binary must retain DWARF debug info. Do not build with `-ldflags="-s -w"`.
 - **GoAkt v4.** The instrumented symbols match GoAkt v4.
 
@@ -76,13 +72,13 @@ When sharing the PID namespace, the target process is typically PID 1.
 
 ### Bare metal
 
-Build from source or extract from the Docker image, then run with the target PID:
+Build from source or extract the binary from the Docker image, then run it with the target PID:
 
 ```bash
-# Option 1: Build from source (Linux only)
+# Option 1: build from source (Linux only)
 go build -o goakt-ebpf ./cmd/cli/...
 
-# Option 2: Extract from Docker image
+# Option 2: extract from the Docker image
 docker run --rm --entrypoint cat ghcr.io/tochemey/goakt-ebpf:latest \
   /usr/local/bin/goakt-ebpf > goakt-ebpf && chmod +x goakt-ebpf
 
@@ -118,42 +114,19 @@ The app also emits `send-tell` / `send-ask` every 5 seconds with the same 3-leve
 
 | Flag                 | Description                                                        |
 |----------------------|--------------------------------------------------------------------|
-| `-pid <pid>`         | Target process ID. Use `1` when sharing the PID namespace.        |
+| `-pid <pid>`         | Target process ID. Use `1` when sharing the PID namespace.         |
 | `-exe <path>`        | Target executable path; finds PID by matching `/proc/<pid>/exe`.   |
 | `-log-level <level>` | Log verbosity: `debug`, `info`, `warn`, `error` (default: `info`). |
 
 ### Environment Variables
 
-| Variable                          | Description                                                       |
-|-----------------------------------|-------------------------------------------------------------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT`     | OTLP endpoint (e.g. `http://otel-collector:4318`).                |
-| `OTEL_EXPORTER_OTLP_PROTOCOL`     | `http/protobuf` or `grpc` (default: `http/protobuf`).             |
-| `OTEL_SERVICE_NAME`               | Service name for exported traces (default: `goakt-ebpf`).         |
-| `GOAKT_EBPF_TARGET_PID`           | Target PID (used if `-pid` is not set).                           |
-| `GOAKT_EBPF_LOG_LEVEL`            | Log level (overridden by `-log-level`).                           |
-| `GOAKT_EBPF_DEBUG_CONTEXT_READER` | Set to `1` to log context chain walking and span layout matching. |
-
-## What You See in Traces
-
-The agent produces spans for actor operations without any code changes:
-
-| Category                          | Spans                                                                                                                                                                                     | Description                                                                |
-|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| **Message handling (PID)**        | `actor.doReceive`, `actor.process`                                                                                                                                                        | When actors receive and process messages, with timing and success/failure. |
-| **Grain processing**              | `grain.doReceive`, `grain.process`                                                                                                                                                        | Grain message handling and lifecycle.                                      |
-| **Grain messaging**               | `grain.tell`, `grain.ask`                                                                                                                                                                 | Local grain sends and requests (client-side).                              |
-| **Remote messaging (System)**     | `actorSystem.remoteTell`, `actorSystem.remoteAsk`, `actorSystem.remoteTellReceive`, `actorSystem.remoteAskReceive`                                                                        | Sends and receives across nodes.                                           |
-| **Remote grains**                 | `grain.remoteTell`, `grain.remoteAsk`, `grain.remoteTellReceive`, `grain.remoteAskReceive`, `grain.remoteActivate`                                                                        | Cross-node grain operations.                                               |
-| **Spawn lifecycle (System)**      | `actorSystem.spawn`, `actorSystem.spawnOn`, `actorSystem.actorOf`, `actorSystem.spawnNamedFromFunc`, `actorSystem.spawnFromFunc`, `actorSystem.spawnRouter`, `actorSystem.spawnSingleton` | Actor system spawn operations.                                             |
-| **Spawn lifecycle (PID)**         | `actor.spawnChild`                                                                                                                                                                        | PID child spawning.                                                        |
-| **Actor system operations**       | `actorSystem.start`, `actorSystem.stop`, `actorSystem.kill`, `actorSystem.reSpawn`, `actorSystem.actorExists`, `actorSystem.actors`, `actorSystem.metric`                                 | System lifecycle and inspection.                                           |
-| **Scheduling (System)**           | `actorSystem.scheduleOnce`, `actorSystem.schedule`, `actorSystem.scheduleWithCron`                                                                                                        | Message scheduling.                                                        |
-| **Local messaging (PID)**         | `actor.tell`, `actor.ask`, `actor.sendAsync`, `actor.sendSync`, `actor.batchTell`, `actor.batchAsk`                                                                                       | Local actor messaging (client-side).                                       |
-| **Remote lifecycle (System)**     | `actorSystem.remoteSpawn`, `actorSystem.remoteSpawnChild`, `actorSystem.remoteStop`, `actorSystem.remoteReSpawn`, `actor.relocation`                                                      | Remote actor management.                                                   |
-| **Remote metadata (System)**      | `actorSystem.remoteLookup`, `actorSystem.remoteState`, `actorSystem.remoteKind`, `actorSystem.remoteMetric`, `actorSystem.remoteReinstate`, `actorSystem.remotePassivationStrategy`       | System-level inspection and management.                                    |
-| **Remote metadata (System cont)** | `actorSystem.remoteChildren`, `actorSystem.remoteParent`, `actorSystem.remoteDependencies`, `actorSystem.remoteRole`, `actorSystem.remoteStashSize`                                       | Additional system-level remote operations.                                 |
-| **Remote operations (PID)**       | `actor.remoteLookup`, `actor.remoteStop`, `actor.remoteReSpawn`                                                                                                                           | PID-level remote operations.                                               |
-| **PID operations**                | `actor.stop`, `actor.restart`, `actor.metric`, `actor.reinstateNamed`, `actor.pipeTo`, `actor.pipeToName`, `actor.discoverActor`, `actor.shutdown`                                        | PID lifecycle and utilities.                                               |
+| Variable                      | Description                                               |
+|-------------------------------|-----------------------------------------------------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint (e.g. `http://otel-collector:4318`).        |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` or `grpc` (default: `http/protobuf`).     |
+| `OTEL_SERVICE_NAME`           | Service name for exported traces (default: `goakt-ebpf`). |
+| `GOAKT_EBPF_TARGET_PID`       | Target PID (used if `-pid` is not set).                   |
+| `GOAKT_EBPF_LOG_LEVEL`        | Log level (overridden by `-log-level`).                   |
 
 ## Deployment
 
@@ -194,6 +167,31 @@ spec:
       args: ["-pid", "1"]
 ```
 
+## Connecting App Spans to Actor Spans
+
+If your application already uses the standard OpenTelemetry Go SDK (`go.opentelemetry.io/otel/sdk`) to create spans, whether from HTTP handlers, gRPC interceptors, or manual `tracer.Start` calls, goakt-ebpf links its actor spans as children of your application spans:
+
+```
+GET /api/order                    ← your app span (otelhttp / otelgrpc)
+  └── actor.doReceive             ← goakt-ebpf span (auto-linked)
+        └── actor.process         ← goakt-ebpf span (auto-linked)
+```
+
+To enable this:
+
+1. Use the standard OTEL SDK: `sdktrace.NewTracerProvider(...)` with a sampled exporter.
+2. Set it globally: `otel.SetTracerProvider(tp)`.
+3. Instrument your entry points (HTTP handlers, gRPC interceptors, and so on) so spans exist in `context.Context`.
+4. Pass that context into actor calls: `actor.Tell(ctx, pid, msg)`, `actor.Ask(ctx, pid, msg)`, and the rest.
+
+If any of these steps is missing, actor spans still appear, but they are not linked to your application spans and show up as root spans.
+
+> [!NOTE]
+> With HTTP middleware such as `otelhttp`, pass the request's own context (`r.Context()`) to `Tell`/`Ask`. The agent reads the span from that context while the call runs, so no extra wrapping is needed.
+
+> [!WARNING]
+> The OpenTelemetry Auto SDK (`go.opentelemetry.io/auto/sdk`) is not supported for parent-child linking, because its span context is zero-initialized in user space.
+
 ## Distributed Tracing (Cross-Node)
 
 For cross-node trace correlation, configure GoAkt with OpenTelemetry's TraceContext propagator:
@@ -206,6 +204,27 @@ remote.WithContextPropagator(propagation.NewCompositeTextMapPropagator(
     propagation.Baggage{},
 ))
 ```
+
+## What You See in Traces
+
+The agent produces spans for actor operations without any code changes:
+
+| Category                      | Spans                                                                                                                                                                                                                                                                                                                                    | Description                                                                |
+|-------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
+| **Message handling (PID)**    | `actor.doReceive`, `actor.process`                                                                                                                                                                                                                                                                                                       | When actors receive and process messages, with timing and success/failure. |
+| **Local messaging (PID)**     | `actor.tell`, `actor.ask`, `actor.sendAsync`, `actor.sendSync`, `actor.batchTell`, `actor.batchAsk`                                                                                                                                                                                                                                      | Local actor messaging (client-side).                                       |
+| **PID operations**            | `actor.stop`, `actor.restart`, `actor.metric`, `actor.reinstateNamed`, `actor.pipeTo`, `actor.pipeToName`, `actor.discoverActor`, `actor.shutdown`                                                                                                                                                                                       | PID lifecycle and utilities.                                               |
+| **Spawn lifecycle (PID)**     | `actor.spawnChild`                                                                                                                                                                                                                                                                                                                       | PID child spawning.                                                        |
+| **Remote operations (PID)**   | `actor.remoteLookup`, `actor.remoteStop`, `actor.remoteReSpawn`                                                                                                                                                                                                                                                                          | PID-level remote operations.                                               |
+| **Actor system operations**   | `actorSystem.start`, `actorSystem.stop`, `actorSystem.kill`, `actorSystem.reSpawn`, `actorSystem.actorExists`, `actorSystem.actors`, `actorSystem.metric`                                                                                                                                                                                | System lifecycle and inspection.                                           |
+| **Spawn lifecycle (System)**  | `actorSystem.spawn`, `actorSystem.spawnOn`, `actorSystem.actorOf`, `actorSystem.spawnNamedFromFunc`, `actorSystem.spawnFromFunc`, `actorSystem.spawnRouter`, `actorSystem.spawnSingleton`                                                                                                                                                | Actor system spawn operations.                                             |
+| **Scheduling (System)**       | `actorSystem.scheduleOnce`, `actorSystem.schedule`, `actorSystem.scheduleWithCron`                                                                                                                                                                                                                                                       | Message scheduling.                                                        |
+| **Remote messaging (System)** | `actorSystem.remoteTell`, `actorSystem.remoteAsk`, `actorSystem.remoteTellReceive`, `actorSystem.remoteAskReceive`                                                                                                                                                                                                                       | Sends and receives across nodes.                                           |
+| **Remote lifecycle (System)** | `actorSystem.remoteSpawn`, `actorSystem.remoteSpawnChild`, `actorSystem.remoteStop`, `actorSystem.remoteReSpawn`, `actor.relocation`                                                                                                                                                                                                     | Remote actor management.                                                   |
+| **Remote metadata (System)**  | `actorSystem.remoteLookup`, `actorSystem.remoteState`, `actorSystem.remoteKind`, `actorSystem.remoteMetric`, `actorSystem.remoteReinstate`, `actorSystem.remotePassivationStrategy`, `actorSystem.remoteChildren`, `actorSystem.remoteParent`, `actorSystem.remoteDependencies`, `actorSystem.remoteRole`, `actorSystem.remoteStashSize` | System-level remote inspection and management.                             |
+| **Grain processing**          | `grain.doReceive`, `grain.process`                                                                                                                                                                                                                                                                                                       | Grain message handling and lifecycle.                                      |
+| **Grain messaging**           | `grain.tell`, `grain.ask`                                                                                                                                                                                                                                                                                                                | Local grain sends and requests (client-side).                              |
+| **Remote grains**             | `grain.remoteTell`, `grain.remoteAsk`, `grain.remoteTellReceive`, `grain.remoteAskReceive`, `grain.remoteActivate`                                                                                                                                                                                                                       | Cross-node grain operations.                                               |
 
 ## Building from Source
 
@@ -222,13 +241,14 @@ make docker-test       # runs generate + tests in Docker
 
 ## Troubleshooting
 
-| Issue                                  | Cause                                                     | Fix                                                                                                                                           |
-|----------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `operation not permitted`              | eBPF not supported (Docker Desktop, missing capabilities) | Run on Linux. Use `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON`. On macOS use [Lima](examples/integration/README.md).                          |
-| `could not find offset for function`   | Symbol missing (stripped binary, older GoAkt)             | Build without `-ldflags="-s -w"`. Optional probes log a warning and continue.                                                                 |
-| No spans in backend                    | OTLP misconfigured                                        | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                             |
-| Actor spans are root spans (no parent) | Context not propagated, Auto SDK used, or raw `otelhttp` request context | Pass the HTTP/gRPC `ctx` into `actor.Tell`/`Ask`. Use the standard OTEL SDK, not Auto SDK. For `otelhttp`, rebind the span as in the [integration example](examples/integration/README.md). Enable debug: `GOAKT_EBPF_DEBUG_CONTEXT_READER=1`. |
-| `bpf_x86_bpfel.o: no matching files`   | BPF objects not generated                                 | Run `make docker-generate` (macOS/Windows) or `go generate ./...` (Linux).                                                                    |
+| Issue                                  | Cause                                                                                                                                | Fix                                                                                                                                                                                                   |
+|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `operation not permitted`              | eBPF not supported (Docker Desktop, missing capabilities).                                                                           | Run on Linux with `--cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON`. On macOS use [Lima](examples/integration/README.md).                                                                                  |
+| `could not find offset for function`   | Symbol missing (stripped binary, older GoAkt).                                                                                       | Build without `-ldflags="-s -w"`. Optional probes log a warning and continue.                                                                                                                         |
+| No spans in backend                    | OTLP misconfigured.                                                                                                                  | Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`).                                                                                                                                     |
+| Actor spans are root spans (no parent) | Context not propagated, Auto SDK used, a custom `context.Context` type that does not embed the context it wraps as its first field, or a binary without DWARF. | Pass the HTTP/gRPC `ctx` into `actor.Tell`/`Ask`, use the standard OTEL SDK (not the Auto SDK), and keep DWARF in the binary. A startup warning `cannot read Go types from the target's DWARF` means DWARF is missing. |
+| No actor spans for some requests | The app did not sample those traces. | Expected: the agent follows the app's sampling decision, so it emits no spans under an unsampled app span. |
+| `bpf_x86_bpfel.o: no matching files`   | BPF objects not generated.                                                                                                           | Run `make docker-generate` (macOS/Windows) or `go generate ./...` (Linux).                                                                                                                            |
 
 ## Documentation
 

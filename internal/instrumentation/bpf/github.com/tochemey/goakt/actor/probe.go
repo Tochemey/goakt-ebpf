@@ -27,7 +27,12 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 bpf ./bpf/probe.bpf.c
 
-const pkg = "github.com/tochemey/goakt/v4/actor"
+const (
+	pkg = "github.com/tochemey/goakt/v4/actor"
+
+	otelTracePkg    = "go.opentelemetry.io/otel/trace"
+	otelSDKTracePkg = "go.opentelemetry.io/otel/sdk/trace"
+)
 
 // Event type constants (must match C EVENT_TYPE_*)
 const (
@@ -100,8 +105,7 @@ const (
 )
 
 // New returns a new [probe.Probe] for GoAkt actor instrumentation (all targets).
-// targetPID enables userspace context reading for remote trace propagation when > 0.
-func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
+func New(logger *slog.Logger, version string) probe.Probe {
 	id := probe.ID{
 		SpanKind:        trace.SpanKindConsumer,
 		InstrumentedPkg: pkg,
@@ -118,7 +122,6 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 		"GrainContext",
 		"ctx",
 	)
-	processFn := makeProcessFn(logger, targetPID)
 	return &probe.SpanProducer[bpfObjects, event]{
 		Base: probe.Base[bpfObjects, event]{
 			ID:     id,
@@ -131,6 +134,33 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 				probe.StructFieldConst{
 					Key: "grain_context_ctx_offset",
 					ID:  grainContextContextID,
+				},
+				probe.GoLayoutConst{
+					Types: map[string]string{
+						"ctx_type_value":                  "*context.valueCtx",
+						"ctx_type_cancel":                 "*context.cancelCtx",
+						"ctx_type_timer":                  "*context.timerCtx",
+						"ctx_type_after_func":             "*context.afterFuncCtx",
+						"ctx_type_without_cancel":         "context.withoutCancelCtx",
+						"ctx_type_stop":                   "context.stopCtx",
+						"ctx_type_background":             "context.backgroundCtx",
+						"ctx_type_todo":                   "context.todoCtx",
+						"otel_span_key_type":              otelTracePkg + ".traceContextKeyType",
+						"otel_span_type_recording":        "*" + otelSDKTracePkg + ".recordingSpan",
+						"otel_span_type_sdk_nonrecording": otelSDKTracePkg + ".nonRecordingSpan",
+						"otel_span_type_api_nonrecording": otelTracePkg + ".nonRecordingSpan",
+					},
+					Fields: map[string]process.StructField{
+						"otel_recording_span_sc_offset": {
+							Struct: otelSDKTracePkg + ".recordingSpan", Field: "spanContext",
+						},
+						"otel_sdk_nonrecording_span_sc_offset": {
+							Struct: otelSDKTracePkg + ".nonRecordingSpan", Field: "sc",
+						},
+						"otel_api_nonrecording_span_sc_offset": {
+							Struct: otelTracePkg + ".nonRecordingSpan", Field: "sc",
+						},
+					},
 				},
 			},
 			Uprobes: []*probe.Uprobe{
@@ -161,10 +191,12 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
+					// Usually inlined into its caller, leaving no symbol;
+					// handleRemoteTellHeld above covers the body then.
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).handleRemoteTell",
 					EntryProbe:  "uprobe_handleRemoteTell",
 					ReturnProbe: "uprobe_handleRemoteTell_Returns",
-					FailureMode: probe.FailureModeWarn,
+					FailureMode: probe.FailureModeIgnore,
 				},
 				{
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*actorSystem).handleRemoteAsk",
@@ -547,12 +579,6 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
-					Sym:         "github.com/tochemey/goakt/v4/actor.(*relocator).Relocate",
-					EntryProbe:  "uprobe_Relocate",
-					ReturnProbe: "uprobe_Relocate_Returns",
-					FailureMode: probe.FailureModeWarn,
-				},
-				{
 					// handleReceivedError is a tiny wrapper and is often
 					// inlined; the real body is WithMessage.
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedErrorWithMessage",
@@ -560,125 +586,19 @@ func New(logger *slog.Logger, version string, targetPID int) probe.Probe {
 					FailureMode: probe.FailureModeWarn,
 				},
 				{
+					// Usually inlined, leaving no symbol;
+					// handleReceivedErrorWithMessage above covers it then.
 					Sym:         "github.com/tochemey/goakt/v4/actor.(*PID).handleReceivedError",
 					EntryProbe:  "uprobe_handleReceivedError",
-					FailureMode: probe.FailureModeWarn,
+					FailureMode: probe.FailureModeIgnore,
 				},
 			},
 			SpecFn: loadBpf,
 		},
 		Version:   version,
 		SchemaURL: semconv.SchemaURL,
-		ProcessFn: processFn,
+		ProcessFn: processEvent,
 	}
-}
-
-// parentLink is the resolved trace context of an enqueue (doReceive/receive)
-// span, used as the parent of the matching handling span.
-type parentLink struct {
-	traceID pcommon.TraceID
-	spanID  pcommon.SpanID
-}
-
-// makeProcessFn returns a processFn that correlates each handling span
-// (handleReceived/handleGrainContext, on a dispatcher worker goroutine) with
-// its enqueue span (doReceive/receive, on the caller goroutine). GoAkt v4
-// processes messages asynchronously, so the two run on different goroutines and
-// cannot be linked by goroutine ID; instead they share the *ReceiveContext /
-// *GrainContext pointer, which the probes emit as ReceiveCtxPtr.
-//
-// The enqueue span resolves its own app-level trace via userspace context
-// reading, then the handling span inherits that TraceID and is parented under
-// it. The enqueue event normally arrives first, but the perf ring does not
-// guarantee cross-CPU ordering, so a handling event that arrives before its
-// enqueue is buffered until the enqueue resolves the link.
-func makeProcessFn(logger *slog.Logger, targetPID int) func(*event) ptrace.SpanSlice {
-	links := make(map[uint64]parentLink) // ReceiveCtxPtr → resolved enqueue span
-	pending := make(map[uint64][]event)  // ReceiveCtxPtr → handling events awaiting enqueue
-	const maxEntries = 512
-
-	// evictOne drops an arbitrary entry to bound a map when it is full.
-	evictOne := func(m map[uint64][]event) {
-		for k := range m {
-			delete(m, k)
-			return
-		}
-	}
-
-	emitHandling := func(h *event, p parentLink) ptrace.SpanSlice {
-		spans := processEvent(h, logger, targetPID)
-		if spans.Len() > 0 {
-			spans.At(0).SetTraceID(p.traceID)
-			spans.At(0).SetParentSpanID(p.spanID)
-		}
-		return spans
-	}
-
-	return func(e *event) ptrace.SpanSlice {
-		switch {
-		case isEnqueueEvent(e):
-			// build and doReceive both emit this event type for the same
-			// pooled *ReceiveContext. Keep the first; a later duplicate
-			// would create a second root and steal the handling span.
-			if e.ReceiveCtxPtr != 0 {
-				if _, ok := links[e.ReceiveCtxPtr]; ok {
-					return ptrace.NewSpanSlice()
-				}
-			}
-			spans := processEvent(e, logger, targetPID)
-			if e.ReceiveCtxPtr != 0 && spans.Len() > 0 {
-				p := parentLink{spans.At(0).TraceID(), spans.At(0).SpanID()}
-				if len(links) >= maxEntries {
-					for k := range links {
-						delete(links, k)
-						break
-					}
-				}
-				links[e.ReceiveCtxPtr] = p
-				// ReceiveContext is pooled: at most one handling span
-				// belongs to this enqueue. Extra pending events are
-				// leftovers from a previous occupant of this pointer.
-				if buffered, ok := pending[e.ReceiveCtxPtr]; ok {
-					emitHandling(&buffered[0], p).MoveAndAppendTo(spans)
-					if len(buffered) == 1 {
-						delete(pending, e.ReceiveCtxPtr)
-					} else {
-						pending[e.ReceiveCtxPtr] = buffered[1:]
-					}
-				}
-			}
-			return spans
-
-		case isHandlingEvent(e):
-			if p, ok := links[e.ReceiveCtxPtr]; ok {
-				delete(links, e.ReceiveCtxPtr)
-				return emitHandling(e, p)
-			}
-			// Enqueue not seen yet (cross-CPU reorder): buffer until it arrives.
-			if _, ok := pending[e.ReceiveCtxPtr]; !ok && len(pending) >= maxEntries {
-				logger.Debug("pending handling buffer full, dropping buffered spans")
-				evictOne(pending)
-			}
-			pending[e.ReceiveCtxPtr] = append(pending[e.ReceiveCtxPtr], *e)
-			return ptrace.NewSpanSlice()
-
-		default:
-			return processEvent(e, logger, targetPID)
-		}
-	}
-}
-
-// isEnqueueEvent reports whether the event is an enqueue span (doReceive or
-// grain receive) that carries a correlation pointer for a handling span.
-func isEnqueueEvent(e *event) bool {
-	return e.EventType == eventTypeDoReceive || e.EventType == eventTypeGrainDoReceive
-}
-
-// isHandlingEvent reports whether the event is a handling span (process or
-// grainProcess) that must be linked to its enqueue span via ReceiveCtxPtr.
-func isHandlingEvent(e *event) bool {
-	return (e.EventType == eventTypeProcess || e.EventType == eventTypeGrainProcess) &&
-		e.ReceiveCtxPtr != 0
 }
 
 // event represents an instrumentation event (layout must match C struct goakt_actor_span_t).
@@ -687,16 +607,12 @@ type event struct {
 	HandledSuccessfully uint8
 	_                   [6]byte // padding for alignment
 	context.BaseSpanProperties
-	ContextPtr    uint64 // context.Context data pointer for userspace trace extraction (0 when N/A)
-	ReceiveCtxPtr uint64 // *ReceiveContext/*GrainContext pointer correlating enqueue and handling spans
 }
 
 // baseAttrs is shared to avoid per-span allocation.
 var baseAttrs = []attribute.KeyValue{attribute.String("messaging.system", "goakt")}
 
-var extractParentSpanFromContext = process.ExtractSpanContextFromContext
-
-func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice {
+func processEvent(e *event) ptrace.SpanSlice {
 	spans := ptrace.NewSpanSlice()
 	span := spans.AppendEmpty()
 
@@ -706,17 +622,10 @@ func processEvent(e *event, logger *slog.Logger, targetPID int) ptrace.SpanSlice
 	span.SetSpanID(pcommon.SpanID(e.SpanContext.SpanID))
 	span.SetFlags(uint32(trace.FlagsSampled))
 
-	// Prefer the live userspace context when we have a pointer. The BPF
-	// goid parent can be a leftover span from a previous HTTP request on
-	// a reused goroutine, which would put this span in the wrong tree.
-	if targetPID > 0 && e.ContextPtr != 0 {
-		if psc := extractParentSpanFromContext(targetPID, e.ContextPtr, logger); psc != nil {
-			span.SetParentSpanID(pcommon.SpanID(psc.SpanID()))
-			span.SetTraceID(pcommon.TraceID(psc.TraceID()))
-		} else if e.ParentSpanContext.SpanID.IsValid() {
-			span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
-		}
-	} else if e.ParentSpanContext.SpanID.IsValid() {
+	// The probe already resolved the parent (an app span on the context,
+	// the enqueue span of a handled message, or an eBPF span) and gave the
+	// span its trace ID.
+	if e.ParentSpanContext.SpanID.IsValid() {
 		span.SetParentSpanID(pcommon.SpanID(e.ParentSpanContext.SpanID))
 	}
 

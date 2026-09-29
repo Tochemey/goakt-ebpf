@@ -126,6 +126,11 @@ func WithKeyValue(key string, value interface{}) Option {
 	return option{key: value}
 }
 
+// WithKeyValues returns an option that will set every key to its value.
+func WithKeyValues(values map[string]interface{}) Option {
+	return option(values)
+}
+
 // WithOffset returns an option that sets key to the offset value of the struct
 // field defined by id at the specified version ver.
 //

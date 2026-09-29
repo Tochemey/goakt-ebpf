@@ -44,22 +44,6 @@
     },
     {
       customType: "regex",
-      managerFilePatterns: ["/Earthfile$/"],
-      matchStrings: ["FROM golang:(?<currentValue>[^\\s\\n]+)"],
-      depNameTemplate: "golang",
-      datasourceTemplate: "docker",
-    },
-    {
-      customType: "regex",
-      managerFilePatterns: ["/Earthfile$/"],
-      matchStrings: [
-        "github.com/cilium/ebpf/cmd/bpf2go@(?<currentValue>v[\\d.]+)",
-      ],
-      depNameTemplate: "github.com/cilium/ebpf",
-      datasourceTemplate: "go",
-    },
-    {
-      customType: "regex",
       managerFilePatterns: ["/Dockerfile$/"],
       matchStrings: [
         "github.com/cilium/ebpf/cmd/bpf2go@(?<currentValue>v[\\d.]+)",

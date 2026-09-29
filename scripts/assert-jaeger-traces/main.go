@@ -10,8 +10,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -32,6 +32,7 @@ type span struct {
 	SpanID        string      `json:"spanID"`
 	OperationName string      `json:"operationName"`
 	References    []reference `json:"references"`
+	StartTime     int64       `json:"startTime"` // microseconds since epoch
 }
 
 type reference struct {
@@ -60,17 +61,28 @@ var grainAppSpanNames = map[string]bool{
 	"GET /increment": true, "GET /count": true,
 }
 
+func main() {
+	os.Exit(run(os.Getenv, os.Stdout, os.Stderr))
+}
+
+// run validates the traces and returns the process exit code.
+//
 // nolint:funlen
 // nolint:gocognit
 // nolint:gocyclo
-func main() {
+func run(getenv func(string) string, stdout, stderr io.Writer) int {
 	// set jeager query URL and service name via env vars for CI flexibility; defaults work for local testing with docker-compose
-	baseURL := strings.TrimSuffix(envOr("JAEGER_QUERY_URL", "http://localhost:16686"), "/")
-	service := envOr("JAEGER_SERVICE", "goakt-ebpf")
+	baseURL := strings.TrimSuffix(envOr(getenv, "JAEGER_QUERY_URL", "http://localhost:16686"), "/")
+	service := envOr(getenv, "JAEGER_SERVICE", "goakt-ebpf")
 
-	traces := fetchTraces(baseURL, service)
-	if len(traces) == 0 {
-		fatal("no traces found for service=%s", service)
+	traces, err := fetchTraces(baseURL, service, stderr)
+	if err == nil && len(traces) == 0 {
+		err = fmt.Errorf("no traces found for service=%s", service)
+	}
+
+	if err != nil {
+		fmt.Fprintf(stderr, "assert-jaeger-traces: %v\n", err)
+		return 1
 	}
 
 	requiredNames := []string{
@@ -186,7 +198,7 @@ func main() {
 
 	passed := true
 	fail := func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)
+		fmt.Fprintf(stderr, "FAIL: "+format+"\n", args...)
 		passed = false
 	}
 
@@ -212,22 +224,22 @@ func main() {
 	if stats.processTotal == 0 {
 		fail("no actor.process spans found")
 	} else if stats.processWithDR == 0 {
-		fail("no actor.process spans have actor.doReceive as parent (buffering/goid propagation broken)")
+		fail("no actor.process spans have actor.doReceive as parent (enqueue/handling correlation broken)")
 	} else if ratio := pct(stats.processWithDR, stats.processTotal); ratio < 30 {
 		fail("only %d/%d (%d%%) actor.process spans have actor.doReceive as parent; want >= 30%%",
 			stats.processWithDR, stats.processTotal, ratio)
 	}
 
-	// 5. actor.doReceive must have an app span as parent (userspace context extraction).
+	// 5. actor.doReceive must have an app span as parent (app span context extraction).
 	if stats.receiveTotal == 0 {
 		fail("no actor.doReceive spans found")
 	} else if stats.receiveWithApp == 0 {
-		fail("no actor.doReceive spans have app span as parent (userspace context extraction broken)")
+		fail("no actor.doReceive spans have app span as parent (app span context extraction broken)")
 	}
 
 	// 6. Both HTTP and manual paths must produce linked doReceive spans.
 	if stats.receiveWithHTTP == 0 {
-		fail("no actor.doReceive spans have HTTP parent (GET /echo, GET /ask) — otelhttp + Layout C broken")
+		fail("no actor.doReceive spans have HTTP parent (GET /echo, GET /ask) — otelhttp context extraction broken")
 	}
 	if stats.receiveWithManual == 0 {
 		fail("no actor.doReceive spans have manual parent (send-tell, send-ask) — manual context propagation broken")
@@ -273,28 +285,63 @@ func main() {
 		fail("no complete grain chains (app → grain.doReceive → grain.process) found")
 	}
 
-	if !passed {
-		fmt.Fprintln(os.Stderr, "\n--- Trace dump for debugging ---")
-		dumpTraces(traces)
-		os.Exit(1)
+	links := checkLinks(traces)
+
+	// 13. The checks below must have requests to look at.
+	if links.checkedRequests == 0 {
+		fail("no app requests made after the agent attached were found to check")
 	}
 
-	fmt.Println("assert-jaeger-traces: OK")
-	fmt.Printf("  traces: %d (%d with multiple spans)\n", len(traces), stats.multiSpanTraces)
-	fmt.Printf("  total spans: %d\n", stats.totalSpans)
-	fmt.Printf("  actor.process: %d/%d with doReceive parent\n", stats.processWithDR, stats.processTotal)
-	fmt.Printf("  actor.doReceive: %d/%d with app parent (%d HTTP, %d manual)\n",
+	// 14. No request may be missing agent spans.
+	if links.incomplete > 0 {
+		fail("%d of %d app requests are missing agent spans (spans lost)", links.incomplete, links.checkedRequests)
+	}
+
+	// 15. No trace may hold spans of another request.
+	if links.overfull > 0 {
+		fail("%d of %d app requests hold agent spans of other requests", links.overfull, links.checkedRequests)
+	}
+
+	if links.overfullEnqueues > 0 {
+		fail("%d spans parent the handling spans of several messages", links.overfullEnqueues)
+	}
+
+	// 16. No agent span may point at a parent missing from its trace: that
+	// parent was misread, and the span shows up detached.
+	if links.danglingParents > 0 {
+		fail("%d agent spans reference a parent that is not in their trace (misread parent)", links.danglingParents)
+	}
+
+	// 17. Every agent span in these examples belongs to an app request.
+	if links.parentlessSpans > 0 {
+		fail("%d agent spans have no parent (detached from their request)", links.parentlessSpans)
+	}
+
+	if !passed {
+		fmt.Fprintln(stderr, "\n--- Trace dump for debugging ---")
+		dumpTraces(stderr, traces)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, "assert-jaeger-traces: OK")
+	fmt.Fprintf(stdout, "  traces: %d (%d with multiple spans)\n", len(traces), stats.multiSpanTraces)
+	fmt.Fprintf(stdout, "  total spans: %d\n", stats.totalSpans)
+	fmt.Fprintf(stdout, "  actor.process: %d/%d with doReceive parent\n", stats.processWithDR, stats.processTotal)
+	fmt.Fprintf(stdout, "  actor.doReceive: %d/%d with app parent (%d HTTP, %d manual)\n",
 		stats.receiveWithApp, stats.receiveTotal, stats.receiveWithHTTP, stats.receiveWithManual)
-	fmt.Printf("  complete chains (app→doReceive→process): %d (%d HTTP, %d manual)\n",
+	fmt.Fprintf(stdout, "  complete chains (app→doReceive→process): %d (%d HTTP, %d manual)\n",
 		stats.completeChains, stats.httpCompleteChains, stats.manualCompleteChains)
-	fmt.Printf("  grain.tell/grain.ask: %d/%d with app parent\n",
+	fmt.Fprintf(stdout, "  grain.tell/grain.ask: %d/%d with app parent\n",
 		stats.grainCallerWithApp, stats.grainCallerTotal)
-	fmt.Printf("  grain.doReceive: %d/%d with app parent\n",
+	fmt.Fprintf(stdout, "  grain.doReceive: %d/%d with app parent\n",
 		stats.grainReceiveWithApp, stats.grainReceiveTotal)
-	fmt.Printf("  grain.process: %d/%d with doReceive parent\n",
+	fmt.Fprintf(stdout, "  grain.process: %d/%d with doReceive parent\n",
 		stats.grainProcessWithDR, stats.grainProcessTotal)
-	fmt.Printf("  complete grain chains (app→grain.doReceive→grain.process): %d\n",
+	fmt.Fprintf(stdout, "  complete grain chains (app→grain.doReceive→grain.process): %d\n",
 		stats.grainCompleteChains)
+	fmt.Fprintf(stdout, "  app requests with exactly their agent spans: %d checked\n", links.checkedRequests)
+
+	return 0
 }
 
 // parentSpan resolves the CHILD_OF parent within the same trace's span map.
@@ -317,9 +364,9 @@ func pct(n, total int) int {
 }
 
 // dumpTraces prints a compact tree view of each trace for CI debugging.
-func dumpTraces(traces []trace) {
+func dumpTraces(w io.Writer, traces []trace) {
 	for i, t := range traces {
-		fmt.Fprintf(os.Stderr, "\nTrace %d [%s] (%d spans):\n", i+1, t.TraceID, len(t.Spans))
+		fmt.Fprintf(w, "\nTrace %d [%s] (%d spans):\n", i+1, t.TraceID, len(t.Spans))
 
 		// Index all spans first so parent lookups work regardless of the
 		// order spans appear in the response.
@@ -361,7 +408,7 @@ func dumpTraces(traces []trace) {
 		printTree = func(id string, indent int) {
 			s := spanByID[id]
 			prefix := strings.Repeat("  ", indent)
-			fmt.Fprintf(os.Stderr, "%s%s [%s]\n", prefix, s.OperationName, s.SpanID[:min(8, len(s.SpanID))])
+			fmt.Fprintf(w, "%s%s [%s]\n", prefix, s.OperationName, s.SpanID[:min(8, len(s.SpanID))])
 			kids := children[id]
 			sort.Strings(kids)
 			for _, kid := range kids {
@@ -376,74 +423,66 @@ func dumpTraces(traces []trace) {
 
 // fetchTraces retrieves traces from the agent and app services and merges
 // them by trace ID so that cross-service parent references resolve correctly.
-func fetchTraces(baseURL, service string) []trace {
-	agentTraces := fetchServiceTraces(baseURL, service)
-
-	merged := make(map[string]*trace)
-	for i := range agentTraces {
-		t := &agentTraces[i]
-		merged[t.TraceID] = t
-	}
-
-	for _, appService := range []string{"integration-app", "grains-app"} {
-		for _, t := range fetchServiceTraces(baseURL, appService) {
-			if existing, ok := merged[t.TraceID]; ok {
-				existing.Spans = append(existing.Spans, t.Spans...)
-			} else {
-				dup := t
-				merged[t.TraceID] = &dup
-			}
+func fetchTraces(baseURL, service string, stderr io.Writer) ([]trace, error) {
+	var fetched [][]trace
+	for _, svc := range []string{service, "integration-app", "grains-app"} {
+		traces, err := fetchServiceTraces(baseURL, svc)
+		if err != nil {
+			return nil, err
 		}
+
+		if len(traces) >= traceLimit {
+			fmt.Fprintf(stderr, "note: only the latest %d traces of service=%s are checked\n", traceLimit, svc)
+		}
+
+		fetched = append(fetched, traces)
 	}
 
-	out := make([]trace, 0, len(merged))
-	for _, t := range merged {
-		out = append(out, *t)
-	}
-	return out
+	return mergeTraces(fetched, time.Now().Add(-settleTime).UnixMicro()), nil
 }
+
+// traceLimit is the most traces fetched per service: enough for a whole CI
+// run, so that the traces reach back to when the agent attached.
+var traceLimit = 20000
 
 // httpClient bounds every Jaeger query so a hung backend fails CI promptly
 // instead of stalling indefinitely.
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // fetchServiceTraces returns the traces for a service. Infrastructure failures
-// (unreachable Jaeger, non-200, undecodable body) are fatal with a clear
+// (unreachable Jaeger, non-200, undecodable body) are errors with a clear
 // message so CI does not misdiagnose them as "context propagation broken"; an
 // empty-but-successful response returns an empty slice.
-func fetchServiceTraces(baseURL, service string) []trace {
-	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=50", baseURL, service)
-	parsedURL, err := url.ParseRequestURI(rawURL)
+func fetchServiceTraces(baseURL, service string) ([]trace, error) {
+	rawURL := fmt.Sprintf("%s/api/traces?service=%s&limit=%d", baseURL, service, traceLimit)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		fatal("invalid Jaeger query URL %q: %v", rawURL, err)
+		return nil, fmt.Errorf("invalid Jaeger query URL %q: %w", rawURL, err)
 	}
-	req, err := http.NewRequest(http.MethodGet, parsedURL.String(), nil)
-	if err != nil {
-		fatal("build Jaeger request: %v", err)
-	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		fatal("query Jaeger at %s (is it running?): %v", baseURL, err)
+		return nil, fmt.Errorf("query Jaeger at %s (is it running?): %w", baseURL, err)
 	}
+
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
-		fatal("Jaeger returned HTTP %d for service=%s", resp.StatusCode, service)
+		return nil, fmt.Errorf("got HTTP %d from Jaeger for service=%s", resp.StatusCode, service)
 	}
+
 	var tr traceResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		fatal("decode Jaeger response for service=%s: %v", service, err)
+		return nil, fmt.Errorf("decode Jaeger response for service=%s: %w", service, err)
 	}
-	return tr.Data
+
+	return tr.Data, nil
 }
 
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
+func envOr(getenv func(string) string, key, fallback string) string {
+	if v := getenv(key); v != "" {
 		return v
 	}
-	return fallback
-}
 
-func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "assert-jaeger-traces: "+format+"\n", args...)
-	os.Exit(1)
+	return fallback
 }
