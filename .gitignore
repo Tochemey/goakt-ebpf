@@ -31,10 +31,6 @@ go.work.sum
 bin/
 /examples/integration/.signoz/
 
-# Earthly
-.earthly/
-
-
 # Editor/IDE
 .idea/
 .vscode/

@@ -18,7 +18,3 @@ docs/
 
 # Integration example (built separately)
 examples/
-
-# Earthly
-Earthfile
-.earthly
