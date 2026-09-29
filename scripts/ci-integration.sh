@@ -73,7 +73,6 @@ sudo env \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SERVICE_NAME=goakt-ebpf \
   OTEL_TRACES_STDOUT=1 \
-  GOAKT_EBPF_DEBUG_CONTEXT_READER=1 \
   GOAKT_EBPF_LOG_LEVEL=debug \
   /tmp/goakt-ebpf -pid $APP_PID &
 AGENT_PID=$!
@@ -84,7 +83,6 @@ sudo env \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SERVICE_NAME=goakt-ebpf \
   OTEL_TRACES_STDOUT=1 \
-  GOAKT_EBPF_DEBUG_CONTEXT_READER=1 \
   GOAKT_EBPF_LOG_LEVEL=debug \
   /tmp/goakt-ebpf -pid $GRAINS_APP_PID &
 GRAINS_AGENT_PID=$!
@@ -99,6 +97,21 @@ for i in 1 2 3 4 5; do
   curl -sf "http://localhost:$GRAINS_HTTP_PORT/increment?id=ci" >/dev/null || true
   curl -sf "http://localhost:$GRAINS_HTTP_PORT/count?id=ci" >/dev/null || true
   sleep 1
+done
+
+echo "=== Load phase: concurrent requests (15s) ==="
+# Span loss and spans linked to the wrong request only show under concurrency.
+LOAD_END=$((SECONDS + 15))
+while [ $SECONDS -lt $LOAD_END ]; do
+  pids=()
+  for i in $(seq 1 15); do
+    curl -sf "http://localhost:$HTTP_PORT/echo" >/dev/null & pids+=($!)
+    curl -sf "http://localhost:$HTTP_PORT/ask" >/dev/null & pids+=($!)
+    curl -sf "http://localhost:$GRAINS_HTTP_PORT/increment?id=load$i" >/dev/null & pids+=($!)
+    curl -sf "http://localhost:$GRAINS_HTTP_PORT/count?id=load$i" >/dev/null & pids+=($!)
+  done
+  # Wait for the requests only: the apps and agents are background jobs too.
+  wait "${pids[@]}" || true
 done
 
 echo "=== Waiting for traces (55s) ==="

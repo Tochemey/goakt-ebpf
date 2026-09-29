@@ -90,7 +90,7 @@ func main() {
 				return
 			}
 
-			if err := sys.TellGrain(extractableContext(r), id, "increment"); err != nil {
+			if err := sys.TellGrain(r.Context(), id, "increment"); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -104,7 +104,7 @@ func main() {
 				return
 			}
 
-			count, err := sys.AskGrain(extractableContext(r), id, "get", 2*time.Second)
+			count, err := sys.AskGrain(r.Context(), id, "get", 2*time.Second)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -131,15 +131,6 @@ func main() {
 			sendGrainMessages(ctx, tracer, sys)
 		}
 	}
-}
-
-// extractableContext re-binds the otelhttp span onto a valueCtx under
-// WithoutCancel. That is the same layout tracer.Start produces, which the
-// eBPF userspace reader can walk. The raw request context is a cancelCtx
-// chain that the reader often misses, leaving GET /increment and GET /count
-// as single-span traces.
-func extractableContext(r *http.Request) context.Context {
-	return trace.ContextWithSpan(context.WithoutCancel(r.Context()), trace.SpanFromContext(r.Context()))
 }
 
 func envInt(key string, defaultVal int) int {

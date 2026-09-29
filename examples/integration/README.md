@@ -5,7 +5,7 @@ End-to-end example for goakt-ebpf using Docker Compose. Run this locally to veri
 ## 📋 Prerequisites
 
 - Docker and Docker Compose
-- **Linux host** — eBPF requires a Linux kernel. Docker Desktop on macOS/Windows uses a Linux VM that typically does not support eBPF; you may see `operation not permitted` when attaching to the target process.
+- **Linux host** — eBPF requires a Linux kernel. Docker Desktop on macOS/Windows uses a Linux VM whose eBPF support depends on the release (it worked with kernel 7.0); if you see `operation not permitted` when attaching to the target process, use Lima.
 
 ## 🔧 Running on Mac with Lima
 
@@ -89,7 +89,7 @@ Start it again later with `limactl start docker` (or `limactl start ebpf`).
 
 ## 🔗 Other options (Mac or Windows)
 
-eBPF is a Linux kernel feature. Docker Desktop's VM (linuxkit on Mac, WSL2 on Windows) usually lacks eBPF support or has permission restrictions.
+eBPF is a Linux kernel feature. Docker Desktop's VM (linuxkit on Mac, WSL2 on Windows) lacks eBPF support or has permission restrictions in some releases.
 
 | Option                   | Mac                                                                    | Windows                                                                                                                                   |
 |--------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
@@ -166,17 +166,22 @@ minutes. Docker should have at least 4 GB of memory available.
 
 ### Trace validation (CI)
 
-The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger. It fetches traces from both the `goakt-ebpf` and `integration-app` services and merges them by trace ID so cross-service parent references resolve correctly. The 9 assertions:
+The CI integration test uses `scripts/assert-jaeger-traces` to validate traces in Jaeger. It fetches traces from both the `goakt-ebpf` and `integration-app` services and merges them by trace ID so cross-service parent references resolve correctly. CI sends concurrent requests for 15 seconds before validating, because span loss and spans linked to the wrong request only show under concurrency. The assertions for this example (the grains example has matching ones):
 
 1. **Required span names:** `actor.doReceive`, `actor.process`, `send-tell`, `send-ask`, `GET /echo`, `GET /ask` — all must be present (`actor.systemSpawn` is excluded because Spawn is called before the agent attaches)
 2. **Minimum span count:** ≥ 6 spans across all traces
 3. **Multi-span traces:** At least one trace must contain more than 1 span (context propagation working)
-4. **actor.process → actor.doReceive:** ≥ 30% of `actor.process` spans must have `actor.doReceive` as their parent (validates buffering/goroutine ID propagation)
-5. **actor.doReceive → app span:** At least one `actor.doReceive` span must have an app span (`send-tell`, `send-ask`, `GET /echo`, or `GET /ask`) as parent — validates userspace context extraction from `*sdk/trace.recordingSpan`
+4. **actor.process → actor.doReceive:** ≥ 30% of `actor.process` spans must have `actor.doReceive` as their parent (validates enqueue/handling correlation)
+5. **actor.doReceive → app span:** At least one `actor.doReceive` span must have an app span (`send-tell`, `send-ask`, `GET /echo`, or `GET /ask`) as parent — validates app span context extraction from `*sdk/trace.recordingSpan`
 6. **Both paths:** At least one `actor.doReceive` must have an HTTP parent (`GET /echo` or `GET /ask`) and at least one must have a manual parent (`send-tell` or `send-ask`)
 7. **Complete 3-level chains:** At least one app → `actor.doReceive` → `actor.process` chain must exist
 8. **HTTP complete chain:** At least one `GET /echo` or `GET /ask` → `actor.doReceive` → `actor.process` chain
 9. **Manual complete chain:** At least one `send-tell` or `send-ask` → `actor.doReceive` → `actor.process` chain
+10. **No lost spans:** Every app request made after the agent attached has all of its agent spans
+11. **No spans of other requests:** No app request holds more agent spans than it produces, and no span parents the handling of several messages
+12. **No detached spans:** No agent span has a missing parent, or no parent at all
+
+Assertions 10 to 12 skip requests made in the first 10 seconds after the agent's first span, while its probes are still attaching, and traces newer than 15 seconds, which may not be fully exported.
 
 Set `JAEGER_QUERY_URL` (default `http://localhost:16686`) and `JAEGER_SERVICE` (default `goakt-ebpf`) to override.
 

@@ -112,3 +112,11 @@ func TestGetLatestOffsetNotFound(t *testing.T) {
 	assert.False(t, off.Valid)
 	assert.Nil(t, ver)
 }
+
+func TestWithKeyValues(t *testing.T) {
+	values := map[string]interface{}{"first_key": uint64(1), "second_key": uint64(2)}
+
+	got, err := newConsts([]Option{WithKeyValues(values)})
+	require.NoError(t, err)
+	assert.Equal(t, values, got)
+}

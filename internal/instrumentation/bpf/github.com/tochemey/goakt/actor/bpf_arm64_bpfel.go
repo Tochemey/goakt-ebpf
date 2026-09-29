@@ -37,9 +37,10 @@ type bpfUprobeDataT struct {
 		EndTime             uint64
 		Sc                  bpfSpanContext
 		Psc                 bpfSpanContext
-		ContextPtr          uint64
-		ReceiveCtxPtr       uint64
 	}
+	FrameDepth  uint64
+	TrackedPsc  bpfSpanContext
+	HandledMsg  uint64
 	PrevGoidSc  bpfSpanContext
 	HadPrevGoid uint8
 	_           [3]byte
@@ -60,8 +61,10 @@ const (
 	bpfMapGoaktActorAskGrain                             = "goakt_actor_ask_grain"
 	bpfMapGoaktActorBatchAsk                             = "goakt_actor_batch_ask"
 	bpfMapGoaktActorBatchTell                            = "goakt_actor_batch_tell"
+	bpfMapGoaktActorBuilt                                = "goakt_actor_built"
 	bpfMapGoaktActorDiscoverActor                        = "goakt_actor_discover_actor"
 	bpfMapGoaktActorDoReceive                            = "goakt_actor_do_receive"
+	bpfMapGoaktActorEnqueued                             = "goakt_actor_enqueued"
 	bpfMapGoaktActorGoidToSpanContext                    = "goakt_actor_goid_to_span_context"
 	bpfMapGoaktActorGrainDoReceive                       = "goakt_actor_grain_do_receive"
 	bpfMapGoaktActorGrainProcess                         = "goakt_actor_grain_process"
@@ -261,9 +264,24 @@ const (
 	bpfProgUprobeRemoteTellGrainReturns                  = "uprobe_remoteTellGrain_Returns"
 	bpfProgUprobeRemoteTellHandler                       = "uprobe_remoteTellHandler"
 	bpfProgUprobeRemoteTellHandlerReturns                = "uprobe_remoteTellHandler_Returns"
+	bpfVarCtxTypeAfterFunc                               = "ctx_type_after_func"
+	bpfVarCtxTypeBackground                              = "ctx_type_background"
+	bpfVarCtxTypeCancel                                  = "ctx_type_cancel"
+	bpfVarCtxTypeStop                                    = "ctx_type_stop"
+	bpfVarCtxTypeTimer                                   = "ctx_type_timer"
+	bpfVarCtxTypeTodo                                    = "ctx_type_todo"
+	bpfVarCtxTypeValue                                   = "ctx_type_value"
+	bpfVarCtxTypeWithoutCancel                           = "ctx_type_without_cancel"
 	bpfVarEndAddr                                        = "end_addr"
 	bpfVarGrainContextCtxOffset                          = "grain_context_ctx_offset"
 	bpfVarHex                                            = "hex"
+	bpfVarOtelApiNonrecordingSpanScOffset                = "otel_api_nonrecording_span_sc_offset"
+	bpfVarOtelRecordingSpanScOffset                      = "otel_recording_span_sc_offset"
+	bpfVarOtelSdkNonrecordingSpanScOffset                = "otel_sdk_nonrecording_span_sc_offset"
+	bpfVarOtelSpanKeyType                                = "otel_span_key_type"
+	bpfVarOtelSpanTypeApiNonrecording                    = "otel_span_type_api_nonrecording"
+	bpfVarOtelSpanTypeRecording                          = "otel_span_type_recording"
+	bpfVarOtelSpanTypeSdkNonrecording                    = "otel_span_type_sdk_nonrecording"
 	bpfVarReceiveContextCtxOffset                        = "receive_context_ctx_offset"
 	bpfVarStartAddr                                      = "start_addr"
 	bpfVarTotalCpus                                      = "total_cpus"
@@ -462,8 +480,10 @@ type bpfMapSpecs struct {
 	GoaktActorAskGrain                  *ebpf.MapSpec `ebpf:"goakt_actor_ask_grain"`
 	GoaktActorBatchAsk                  *ebpf.MapSpec `ebpf:"goakt_actor_batch_ask"`
 	GoaktActorBatchTell                 *ebpf.MapSpec `ebpf:"goakt_actor_batch_tell"`
+	GoaktActorBuilt                     *ebpf.MapSpec `ebpf:"goakt_actor_built"`
 	GoaktActorDiscoverActor             *ebpf.MapSpec `ebpf:"goakt_actor_discover_actor"`
 	GoaktActorDoReceive                 *ebpf.MapSpec `ebpf:"goakt_actor_do_receive"`
+	GoaktActorEnqueued                  *ebpf.MapSpec `ebpf:"goakt_actor_enqueued"`
 	GoaktActorGoidToSpanContext         *ebpf.MapSpec `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.MapSpec `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.MapSpec `ebpf:"goakt_actor_grain_process"`
@@ -534,12 +554,27 @@ type bpfMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfVariableSpecs struct {
-	EndAddr                 *ebpf.VariableSpec `ebpf:"end_addr"`
-	GrainContextCtxOffset   *ebpf.VariableSpec `ebpf:"grain_context_ctx_offset"`
-	Hex                     *ebpf.VariableSpec `ebpf:"hex"`
-	ReceiveContextCtxOffset *ebpf.VariableSpec `ebpf:"receive_context_ctx_offset"`
-	StartAddr               *ebpf.VariableSpec `ebpf:"start_addr"`
-	TotalCpus               *ebpf.VariableSpec `ebpf:"total_cpus"`
+	CtxTypeAfterFunc                *ebpf.VariableSpec `ebpf:"ctx_type_after_func"`
+	CtxTypeBackground               *ebpf.VariableSpec `ebpf:"ctx_type_background"`
+	CtxTypeCancel                   *ebpf.VariableSpec `ebpf:"ctx_type_cancel"`
+	CtxTypeStop                     *ebpf.VariableSpec `ebpf:"ctx_type_stop"`
+	CtxTypeTimer                    *ebpf.VariableSpec `ebpf:"ctx_type_timer"`
+	CtxTypeTodo                     *ebpf.VariableSpec `ebpf:"ctx_type_todo"`
+	CtxTypeValue                    *ebpf.VariableSpec `ebpf:"ctx_type_value"`
+	CtxTypeWithoutCancel            *ebpf.VariableSpec `ebpf:"ctx_type_without_cancel"`
+	EndAddr                         *ebpf.VariableSpec `ebpf:"end_addr"`
+	GrainContextCtxOffset           *ebpf.VariableSpec `ebpf:"grain_context_ctx_offset"`
+	Hex                             *ebpf.VariableSpec `ebpf:"hex"`
+	OtelApiNonrecordingSpanScOffset *ebpf.VariableSpec `ebpf:"otel_api_nonrecording_span_sc_offset"`
+	OtelRecordingSpanScOffset       *ebpf.VariableSpec `ebpf:"otel_recording_span_sc_offset"`
+	OtelSdkNonrecordingSpanScOffset *ebpf.VariableSpec `ebpf:"otel_sdk_nonrecording_span_sc_offset"`
+	OtelSpanKeyType                 *ebpf.VariableSpec `ebpf:"otel_span_key_type"`
+	OtelSpanTypeApiNonrecording     *ebpf.VariableSpec `ebpf:"otel_span_type_api_nonrecording"`
+	OtelSpanTypeRecording           *ebpf.VariableSpec `ebpf:"otel_span_type_recording"`
+	OtelSpanTypeSdkNonrecording     *ebpf.VariableSpec `ebpf:"otel_span_type_sdk_nonrecording"`
+	ReceiveContextCtxOffset         *ebpf.VariableSpec `ebpf:"receive_context_ctx_offset"`
+	StartAddr                       *ebpf.VariableSpec `ebpf:"start_addr"`
+	TotalCpus                       *ebpf.VariableSpec `ebpf:"total_cpus"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -572,8 +607,10 @@ type bpfMaps struct {
 	GoaktActorAskGrain                  *ebpf.Map `ebpf:"goakt_actor_ask_grain"`
 	GoaktActorBatchAsk                  *ebpf.Map `ebpf:"goakt_actor_batch_ask"`
 	GoaktActorBatchTell                 *ebpf.Map `ebpf:"goakt_actor_batch_tell"`
+	GoaktActorBuilt                     *ebpf.Map `ebpf:"goakt_actor_built"`
 	GoaktActorDiscoverActor             *ebpf.Map `ebpf:"goakt_actor_discover_actor"`
 	GoaktActorDoReceive                 *ebpf.Map `ebpf:"goakt_actor_do_receive"`
+	GoaktActorEnqueued                  *ebpf.Map `ebpf:"goakt_actor_enqueued"`
 	GoaktActorGoidToSpanContext         *ebpf.Map `ebpf:"goakt_actor_goid_to_span_context"`
 	GoaktActorGrainDoReceive            *ebpf.Map `ebpf:"goakt_actor_grain_do_receive"`
 	GoaktActorGrainProcess              *ebpf.Map `ebpf:"goakt_actor_grain_process"`
@@ -652,8 +689,10 @@ func (m *bpfMaps) Close() error {
 		m.GoaktActorAskGrain,
 		m.GoaktActorBatchAsk,
 		m.GoaktActorBatchTell,
+		m.GoaktActorBuilt,
 		m.GoaktActorDiscoverActor,
 		m.GoaktActorDoReceive,
+		m.GoaktActorEnqueued,
 		m.GoaktActorGoidToSpanContext,
 		m.GoaktActorGrainDoReceive,
 		m.GoaktActorGrainProcess,
@@ -725,12 +764,27 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfVariables struct {
-	EndAddr                 *ebpf.Variable `ebpf:"end_addr"`
-	GrainContextCtxOffset   *ebpf.Variable `ebpf:"grain_context_ctx_offset"`
-	Hex                     *ebpf.Variable `ebpf:"hex"`
-	ReceiveContextCtxOffset *ebpf.Variable `ebpf:"receive_context_ctx_offset"`
-	StartAddr               *ebpf.Variable `ebpf:"start_addr"`
-	TotalCpus               *ebpf.Variable `ebpf:"total_cpus"`
+	CtxTypeAfterFunc                *ebpf.Variable `ebpf:"ctx_type_after_func"`
+	CtxTypeBackground               *ebpf.Variable `ebpf:"ctx_type_background"`
+	CtxTypeCancel                   *ebpf.Variable `ebpf:"ctx_type_cancel"`
+	CtxTypeStop                     *ebpf.Variable `ebpf:"ctx_type_stop"`
+	CtxTypeTimer                    *ebpf.Variable `ebpf:"ctx_type_timer"`
+	CtxTypeTodo                     *ebpf.Variable `ebpf:"ctx_type_todo"`
+	CtxTypeValue                    *ebpf.Variable `ebpf:"ctx_type_value"`
+	CtxTypeWithoutCancel            *ebpf.Variable `ebpf:"ctx_type_without_cancel"`
+	EndAddr                         *ebpf.Variable `ebpf:"end_addr"`
+	GrainContextCtxOffset           *ebpf.Variable `ebpf:"grain_context_ctx_offset"`
+	Hex                             *ebpf.Variable `ebpf:"hex"`
+	OtelApiNonrecordingSpanScOffset *ebpf.Variable `ebpf:"otel_api_nonrecording_span_sc_offset"`
+	OtelRecordingSpanScOffset       *ebpf.Variable `ebpf:"otel_recording_span_sc_offset"`
+	OtelSdkNonrecordingSpanScOffset *ebpf.Variable `ebpf:"otel_sdk_nonrecording_span_sc_offset"`
+	OtelSpanKeyType                 *ebpf.Variable `ebpf:"otel_span_key_type"`
+	OtelSpanTypeApiNonrecording     *ebpf.Variable `ebpf:"otel_span_type_api_nonrecording"`
+	OtelSpanTypeRecording           *ebpf.Variable `ebpf:"otel_span_type_recording"`
+	OtelSpanTypeSdkNonrecording     *ebpf.Variable `ebpf:"otel_span_type_sdk_nonrecording"`
+	ReceiveContextCtxOffset         *ebpf.Variable `ebpf:"receive_context_ctx_offset"`
+	StartAddr                       *ebpf.Variable `ebpf:"start_addr"`
+	TotalCpus                       *ebpf.Variable `ebpf:"total_cpus"`
 }
 
 // bpfPrograms contains all programs after they have been loaded into the kernel.
