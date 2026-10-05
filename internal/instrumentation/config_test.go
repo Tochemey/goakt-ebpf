@@ -18,7 +18,7 @@ import (
 
 func TestNameAndVersion(t *testing.T) {
 	assert.Equal(t, "goakt-ebpf", Name)
-	assert.Equal(t, "0.1.0", Version)
+	assert.Equal(t, "dev", Version)
 }
 
 func TestNewNoopConfigProvider(t *testing.T) {

@@ -16,8 +16,10 @@ import (
 // Name is the distribution name for the GoAkt eBPF agent.
 const Name = "goakt-ebpf"
 
-// Version is the version of the GoAkt eBPF agent.
-const Version = "0.1.0"
+// Version is the version of the GoAkt eBPF agent. Release builds set it to
+// the release tag with -ldflags "-X <this package>.Version=<version>"; other
+// builds report "dev".
+var Version = "dev"
 
 // LibraryID is used to identify an instrumentation library.
 type LibraryID struct {

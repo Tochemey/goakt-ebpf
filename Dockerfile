@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # Production Dockerfile for goakt-ebpf eBPF tracing agent
 # Build: docker build -t goakt-ebpf .
+#   (release builds add --build-arg VERSION=<version>; the agent reports it in its spans)
 # Run:  docker run --cap-add=SYS_PTRACE,SYS_ADMIN,BPF,PERFMON --pid=container:TARGET goakt-ebpf -pid 1
 #
 # Base stage: used by docker-test for cross-platform testing (make docker-test, ./scripts/docker-test.sh)
@@ -28,12 +29,13 @@ COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG REPODIR=/build
+ARG VERSION=dev
 ENV BPF2GO_CFLAGS="-I${REPODIR}/internal/include/libbpf -I${REPODIR}/internal/include"
 ENV GOFLAGS="-mod=mod"
 ENV CGO_ENABLED=0
 
 RUN go generate ./internal/instrumentation/bpf/github.com/tochemey/goakt/actor/... \
-    && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o goakt-ebpf ./cmd/cli/...
+    && GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w -X github.com/tochemey/goakt-ebpf/internal/instrumentation.Version=${VERSION}" -o goakt-ebpf ./cmd/cli/...
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (minimal)
