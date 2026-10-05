@@ -8,6 +8,7 @@ SIGNOZ_COMPOSE := $(SIGNOZ_SOURCE_DIR)/deploy/docker/docker-compose.yaml
 SIGNOZ_COMPOSE_CLEAN := $(SIGNOZ_SOURCE_DIR)/deploy/docker/.goakt-compose.yaml
 SIGNOZ_VERSION_MARKER := $(SIGNOZ_SOURCE_DIR)/.goakt-version
 APP_URL := http://localhost:8081
+OTLP_URL := http://localhost:4318
 SIGNOZ_URL := http://localhost:8080
 
 # Grains example (fully in Docker: backend + app + agent)
@@ -78,6 +79,13 @@ start: build
 
 ## Call the instrumented HTTP endpoints to generate fresh traces
 trace-http:
+	@# The collector accepts connections before it is ready (it waits for the
+	@# ClickHouse migrations), so wait until it takes an OTLP request; spans
+	@# exported earlier are dropped.
+	@echo "Waiting for the SigNoz collector to accept traces..."
+	@curl --fail --silent --retry 60 --retry-delay 5 --retry-all-errors -o /dev/null \
+		-X POST -H "Content-Type: application/json" -d '{}' "$(OTLP_URL)/v1/traces" \
+		|| { echo "SigNoz collector at $(OTLP_URL) is not ready; check: make logs"; exit 1; }
 	@echo "Waiting for the app and eBPF agent to become ready..."
 	@echo "GET /echo:"
 	@curl --fail --silent --show-error --retry 15 --retry-delay 2 --retry-connrefused "$(APP_URL)/echo"
@@ -97,7 +105,11 @@ down:
 	@if [ -f "$(SIGNOZ_COMPOSE)" ] && [ ! -f "$(SIGNOZ_COMPOSE_CLEAN)" ]; then \
 		sed '/^version:[[:space:]]*/d' "$(SIGNOZ_COMPOSE)" > "$(SIGNOZ_COMPOSE_CLEAN)"; \
 	fi
+	@# Kill the app first: the agent shares its PID namespace, where the app is
+	@# PID 1 and never reaps, so stopping the agent alone leaves a zombie that
+	@# Docker cannot kill. Ending the namespace's PID 1 ends the agent with it.
 	@if [ -f "$(SIGNOZ_COMPOSE_CLEAN)" ]; then \
+		docker compose -f "$(COMPOSE_FILE)" kill goakt-app >/dev/null 2>&1 || true; \
 		docker compose -f "$(COMPOSE_FILE)" down --volumes --remove-orphans --timeout 0 || true; \
 	fi
 	@# Force-remove anything Compose left behind (e.g. zombie containers).

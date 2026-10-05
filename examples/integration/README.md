@@ -66,14 +66,14 @@ Ensure the repo is under a path Lima mounts (e.g. `~/go/src/goakt-ebpf` or `/Use
 ```bash
 make build
 make start
-make view     # Opens Jaeger UI in your browser
+make view     # Opens the SigNoz UI in your browser
 ```
 
 Or: `docker compose -f examples/integration/docker-compose.yml up --build`
 
 ### 6. View traces
 
-Run `make view` to open the Jaeger UI, or go to http://localhost:16686. Select service `goakt-ebpf` and click **Find Traces**.
+Run `make view` to open the SigNoz UI, or go to http://localhost:8080. Log in (see [SigNoz login](#signoz-login)), open **Services**, and select `integration-app` or `goakt-ebpf`.
 
 ### Stopping Lima
 
@@ -107,7 +107,7 @@ From the repository root, use the Makefile:
 ```bash
 make build    # Build Docker images
 make start    # Start the integration example
-make view     # Open Jaeger UI in your browser
+make view     # Open the SigNoz UI in your browser
 ```
 
 Or with Docker Compose directly:
@@ -188,38 +188,32 @@ Set `JAEGER_QUERY_URL` (default `http://localhost:16686`) and `JAEGER_SERVICE` (
 ## Architecture
 
 ```
-    ┌─────────────────┐
-    │   goakt-app     │
-    │   (PID 1)       │
-    └────────┬────────┘
-             │ eBPF uprobes (shared PID ns)
-             ▼
-    ┌─────────────────┐
-    │  goakt-ebpf     │
-    │     agent       │
-    └────────┬────────┘
-             │ OTLP HTTP
-             ▼
-    ┌─────────────────┐
-    │ otel-collector  │
-    └────────┬────────┘
-             │ OTLP gRPC
-             ▼
-    ┌─────────────────┐
-    │     Jaeger      │
-    └─────────────────┘
+    ┌─────────────────┐  eBPF uprobes    ┌─────────────────┐
+    │   goakt-app     │◄─────────────────│  goakt-ebpf     │
+    │   (PID 1)       │ (shared PID ns)  │     agent       │
+    └────────┬────────┘                  └────────┬────────┘
+             │ OTLP HTTP (app spans)              │ OTLP HTTP (actor spans)
+             ▼                                    ▼
+    ┌──────────────────────────────────────────────────────┐
+    │        SigNoz otel-collector (:4317 / :4318)         │
+    └──────────────────────────┬───────────────────────────┘
+                               ▼
+    ┌──────────────────────────────────────────────────────┐
+    │           ClickHouse  ──►  SigNoz UI (:8080)         │
+    └──────────────────────────────────────────────────────┘
 ```
 
-The agent runs in the same PID namespace as the app (`pid: "container:goakt-app"`) so it can attach uprobes.
+The agent runs in the same PID namespace as the app (`pid: "container:signoz-integration-app"`) so it can attach uprobes.
 
 ## 🔍 Troubleshooting
 
 | Error                                    | Cause                                                     | Fix                                                                                                                                          |
 |------------------------------------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| No services in Jaeger                    | Docker using Docker Desktop (not Lima)                    | Run `make diagnose`. If DOCKER_HOST is unset, set it (step 3 above). Quit Docker Desktop. Then `make down && make build && make start`.      |
+| No services in SigNoz                    | Docker using Docker Desktop (not Lima)                    | Run `make diagnose`. If DOCKER_HOST is unset, set it (step 3 above). Quit Docker Desktop. Then `make down && make build && make start`.      |
 | `operation not permitted` (Lima vz)      | Lima's vz driver restricts eBPF on Apple Silicon          | Create a Lima instance with QEMU: `limactl start --name=ebpf --vm-type=qemu template:docker`, then set `DOCKER_HOST` to the `ebpf` instance. |
-| No services in Jaeger                    | Agent failed to attach (eBPF)                             | Run `make diagnose` and look for `operation not permitted` in agent logs. Try Lima with QEMU (see above) or a Linux host.                    |
-| No services in Jaeger                    | Agent attached but no traces yet                          | Wait 10–15 seconds. Select service `goakt-ebpf` in Jaeger dropdown, then click **Find Traces**. Run `make logs` to confirm agent is running. |
+| No services in SigNoz                    | Agent failed to attach (eBPF)                             | Run `make diagnose` and look for `operation not permitted` in agent logs. Try Lima with QEMU (see above) or a Linux host.                    |
+| No services in SigNoz                    | Agent attached but no traces yet                          | Wait 10–15 seconds, then open **Services** in SigNoz and select `goakt-ebpf`. Run `make logs` to confirm the agent is running.              |
+| `traces export: ... connection refused` or `EOF` in app/agent logs | SigNoz collector still starting (it waits for the ClickHouse migrations) | Expected during the first minute or two; the errors stop once the collector is ready. `make start` waits for it before sending requests. |
 | `invalid PID 1: operation not permitted` | eBPF not supported (e.g. Docker Desktop on macOS/Windows) | Use Lima/Colima (Mac), a Linux VM, or a remote Linux host                                                                                    |
 | `operation not permitted` when attaching | Insufficient capabilities                                 | The compose file uses `privileged: true`; ensure Docker has permission                                                                       |
 | `limactl list docker` returns nothing    | Instance may have a different name                        | Run `limactl list` to see instances; use that name in `limactl list <name>` and `limactl stop <name>`                                        |
