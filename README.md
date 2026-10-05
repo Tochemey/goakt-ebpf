@@ -35,20 +35,9 @@ goakt-ebpf traces [GoAkt](https://github.com/tochemey/goakt) actor systems witho
 
 The agent runs as a sidecar next to your GoAkt application. It attaches [eBPF](https://ebpf.io/) uprobes to GoAkt's actor and grain functions, turns what they observe into spans, and exports them over the [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otlp/) to any compatible backend.
 
-```mermaid
-flowchart LR
-    subgraph node["Linux host or pod, shared PID namespace"]
-        direction LR
-        app["GoAkt application<br/>(unchanged)"]
-        probes["eBPF uprobes<br/>(in the kernel)"]
-        agent["goakt-ebpf agent<br/>(sidecar)"]
-    end
-    backend[("OTLP backend<br/>SigNoz · Jaeger<br/>Tempo · Honeycomb")]
-
-    app -- "Tell, Ask, message handling" --> probes
-    probes -- "span events" --> agent
-    agent -- "OTLP over HTTP or gRPC" --> backend
-```
+<p align="center">
+  <img src="docs/assets/how-it-works.png" alt="The GoAkt application, unchanged, is observed by eBPF uprobes in the kernel; they send span events to the goakt-ebpf sidecar agent, which exports them over OTLP to a backend such as SigNoz, Jaeger, Tempo, or Honeycomb." width="100%">
+</p>
 
 If your application already creates OpenTelemetry spans, the agent links its actor spans under them, so one request shows up as one trace.
 
